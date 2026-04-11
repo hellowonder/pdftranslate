@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import shutil
 import sys
 from typing import List, Optional, Set
 
@@ -23,6 +24,7 @@ def build_output_paths(input_pdf: str, output_dir: str) -> dict[str, str]:
         "output_dir": os.path.abspath(output_dir),
         "ocr_dir": os.path.join(output_dir, "ocr"),
         "ocr_raw_dir": os.path.join(output_dir, "ocr", "ocr_raw"),
+        "ocr_input_images_dir": os.path.join(output_dir, "ocr", "ocr_input_images"),
         "ocr_images_dir": os.path.join(output_dir, "ocr", "images"),
         "ocr_metadata": os.path.join(output_dir, "ocr", f"{base_name}_ocr.json"),
         "ocr_page_merge": os.path.join(output_dir, "ocr", f"{base_name}_page_merge.json"),
@@ -102,6 +104,11 @@ def parse_args():
     )
     parser.add_argument("--input", required=True, help="Input PDF or DjVu file.")
     parser.add_argument("--output-dir", required=True, help="Directory to store OCR, translation, and render outputs.")
+    parser.add_argument(
+        "--clear",
+        action="store_true",
+        help="Clear the output directory before running.",
+    )
     parser.add_argument("--pages", help="Comma-separated 1-based page numbers or ranges to process, e.g. 1,3,5-7.")
     parser.add_argument(
         "--vllm-sleep",
@@ -200,13 +207,21 @@ def parse_args():
     return args
 
 
-def prepare_output_paths(input_pdf: str, output_dir: str) -> dict[str, str]:
+def prepare_output_paths(input_pdf: str, output_dir: str, clear: bool = False) -> dict[str, str]:
     input_pdf = os.path.abspath(input_pdf)
     output_dir = os.path.abspath(output_dir)
+    if clear and os.path.isdir(output_dir):
+        for entry in os.listdir(output_dir):
+            entry_path = os.path.join(output_dir, entry)
+            if os.path.isdir(entry_path) and not os.path.islink(entry_path):
+                shutil.rmtree(entry_path)
+            else:
+                os.unlink(entry_path)
     os.makedirs(output_dir, exist_ok=True)
     output_paths = build_output_paths(input_pdf, output_dir)
     os.makedirs(output_paths["ocr_dir"], exist_ok=True)
     os.makedirs(output_paths["ocr_raw_dir"], exist_ok=True)
+    os.makedirs(output_paths["ocr_input_images_dir"], exist_ok=True)
     os.makedirs(output_paths["ocr_images_dir"], exist_ok=True)
     os.makedirs(output_paths["translate_dir"], exist_ok=True)
     os.makedirs(output_paths["translate_images_dir"], exist_ok=True)
@@ -216,7 +231,7 @@ def prepare_output_paths(input_pdf: str, output_dir: str) -> dict[str, str]:
 
 def main():
     args = parse_args()
-    output_paths = prepare_output_paths(args.input, args.output_dir)
+    output_paths = prepare_output_paths(args.input, args.output_dir, clear=args.clear)
 
     pdf_reader = PdfReader(output_paths["input_pdf"])
     page_numbers = resolve_target_page_numbers(args, pdf_reader)

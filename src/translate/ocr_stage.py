@@ -114,6 +114,7 @@ def run_ocr_stage(args: argparse.Namespace, output_paths: dict[str, str], page_n
                 ocr_client=init_ocr_client(args),
                 images=images,
                 raw_output_dir=output_paths["ocr_raw_dir"],
+                input_image_dir=output_paths["ocr_input_images_dir"],
                 page_numbers=page_numbers,
                 ocr_workers=args.ocr_workers,
             )

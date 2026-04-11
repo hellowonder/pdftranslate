@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import base64
 import io
+import re
 
 from openai import OpenAI
 from PIL import Image
@@ -11,6 +12,7 @@ DEFAULT_LAYOUT_PROMPT = "<image>\n<|grounding|>Given the layout of the image."
 DEFAULT_OCR_IMAGE_MAX_SIDE = 640
 DEFAULT_OCR_MAX_RETRIES = 3
 OCR_FAILURE_PREFIX = "【OCR "
+COORDINATE_PATTERN = re.compile(r"\[\[(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+\s*)\]\]")
 
 
 def looks_invalid_ocr_output(text: str) -> bool:
@@ -77,11 +79,8 @@ class DeepseekOCRClient:
         self.client = client
         self.model = model
 
-    def infer_with_prompt(
-        self,
-        data_url: str,
-        prompt: str,
-    ) -> str:
+    def _infer_with_retry(self, image: Image.Image, prompt: str) -> str:
+        data_url = encode_image_data_url_for_ocr(image)
         messages = [
             {
                 "role": "user",
@@ -91,7 +90,6 @@ class DeepseekOCRClient:
                 ]
             }
         ]
-        last_error: Exception | None = None
         content = ""
         for _ in range(DEFAULT_OCR_MAX_RETRIES):
             try:
@@ -101,52 +99,38 @@ class DeepseekOCRClient:
                     temperature=0.0,
                 )
                 content = response.choices[0].message.content or ""
-                if looks_invalid_ocr_output(content):
-                    content = "【OCR output looks invalid, possibly due to an incompatible prompt or unsupported multimodal endpoint.】"
-                    continue
-                return content
             except Exception as exc:
-                content = f"【OCR inference error: {exc}】"
+                print(f"OCR inference error: {exc}")
+                continue
         return content
-
-    def infer(
+    
+    def infer_with_prompt(
         self,
-        data_url: str,
+        image: Image.Image,
+        prompt: str,
     ) -> str:
-        return self.infer_with_prompt(
-            data_url=data_url,
-            prompt=DEFAULT_OCR_PROMPT,
-        )
+        content = self._infer_with_retry(image, prompt)
+        
+        if looks_invalid_ocr_output(content):
+            crop_result = crop_main_text_region(image)
+            if crop_result is not None:
+                crop, crop_box = crop_result
+                cropped_content = self._infer_with_retry(crop, prompt)
+                return remap_ocr_coordinates_to_original(
+                    cropped_content,
+                    original_size=image.size,
+                    crop_box=crop_box,
+                )
+
+        return content
 
     def infer_image(
         self,
         image: Image.Image,
     ) -> str:
-        content = self.infer(data_url=encode_image_data_url_for_ocr(image))
-        if not self._should_retry_with_body_crop(content):
-            return content
+        return self.infer_with_prompt(image, DEFAULT_OCR_PROMPT)
 
-        cropped = crop_main_text_region(image)
-        if cropped is None:
-            return content
-
-        cropped_content = self.infer(data_url=encode_image_data_url_for_ocr(cropped))
-        if self._should_retry_with_body_crop(cropped_content):
-            return content
-        return cropped_content
-
-    def _should_retry_with_body_crop(self, content: str) -> bool:
-        stripped = (content or "").strip()
-        if not stripped:
-            return True
-        if stripped.startswith(OCR_FAILURE_PREFIX):
-            return True
-        if looks_invalid_ocr_output(stripped):
-            return True
-        return False
-
-
-def crop_main_text_region(image: Image.Image) -> Image.Image | None:
+def crop_main_text_region(image: Image.Image) -> tuple[Image.Image, tuple[int, int, int, int]] | None:
     grayscale = image.convert("L")
     width, height = grayscale.size
     pixels = grayscale.load()
@@ -194,7 +178,7 @@ def crop_main_text_region(image: Image.Image) -> Image.Image | None:
 
     if None in (top, bottom, left, right):
         return None
-    if bottom <= top or right <= left:
+    if bottom < top or right < left:
         return None
 
     pad_x = max(24, width // 40)
@@ -208,4 +192,41 @@ def crop_main_text_region(image: Image.Image) -> Image.Image | None:
     cropped = image.crop(crop_box)
     if cropped.size == image.size:
         return None
-    return cropped
+    return cropped, crop_box
+
+
+def remap_ocr_coordinates_to_original(
+    content: str,
+    original_size: tuple[int, int],
+    crop_box: tuple[int, int, int, int],
+) -> str:
+    if not content or "[[" not in content:
+        return content
+
+    original_width, original_height = original_size
+    crop_left, crop_top, crop_right, crop_bottom = crop_box
+    crop_width = max(1, crop_right - crop_left)
+    crop_height = max(1, crop_bottom - crop_top)
+
+    def _replace(match: re.Match[str]) -> str:
+        try:
+            x1, y1, x2, y2 = [int(part.strip()) for part in match.group(1).split(",")]
+        except ValueError:
+            return match.group(0)
+
+        mapped = (
+            _map_coord(x1, crop_left, crop_width, original_width),
+            _map_coord(y1, crop_top, crop_height, original_height),
+            _map_coord(x2, crop_left, crop_width, original_width),
+            _map_coord(y2, crop_top, crop_height, original_height),
+        )
+        return f"[[{mapped[0]}, {mapped[1]}, {mapped[2]}, {mapped[3]}]]"
+
+    return COORDINATE_PATTERN.sub(_replace, content)
+
+
+def _map_coord(coord: int, crop_start: int, crop_span: int, original_span: int) -> int:
+    clamped = min(999, max(0, coord))
+    absolute = crop_start + (clamped / 999.0) * crop_span
+    mapped = round((absolute / max(1, original_span)) * 999)
+    return min(999, max(0, mapped))

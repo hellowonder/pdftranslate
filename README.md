@@ -22,7 +22,7 @@
 1. OCR 服务需要本地运行 `vllm + deepseek-ai/DeepSeek-OCR`。(测试时目前只能使用这种方式，`ollama + deepseek-ocr:3b` 现在有兼容性问题。)
 
 ```bash
-VLLM_SERVER_DEV_MODE=1 /home/wonder/src/DeepSeek-OCR/.vllm-env/bin/vllm serve \
+VLLM_SERVER_DEV_MODE=1 ./.vllm-env/bin/vllm serve \
         deepseek-ai/DeepSeek-OCR \
         --enable-sleep-mode \
         --port 8000

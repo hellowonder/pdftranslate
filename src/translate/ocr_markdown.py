@@ -12,7 +12,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from translate_service import configure_openai
-from ocr_client import DeepseekOCRClient
+from ocr_client import DeepseekOCRClient, resize_image_for_ocr
 from ocr_postprocess import process_ocr_page_content
 from ocr_pdf_bold_styles import apply_bold_texts_to_markdown, extract_bold_text_by_page
 from ocr_pdf_images import pdf_to_images_high_quality, resolve_page_numbers
@@ -91,6 +91,17 @@ def build_raw_ocr_output_paths(raw_output_dir: str, page_number: int) -> tuple[P
     )
 
 
+def build_ocr_input_image_path(input_image_dir: str, page_number: int) -> Path:
+    return Path(input_image_dir) / f"page_{page_number:04d}.png"
+
+
+def save_ocr_input_image(input_image_dir: str, page_number: int, image: Image.Image) -> None:
+    path = build_ocr_input_image_path(input_image_dir, page_number)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Save the exact resized image that will be sent to OCR for debugging and reuse.
+    resize_image_for_ocr(image).save(path, format="PNG")
+
+
 def raw_ocr_outputs_exist(raw_output_dir: str, page_number: int) -> bool:
     raw_path, layout_path = build_raw_ocr_output_paths(raw_output_dir, page_number)
     return raw_path.exists() and layout_path.exists()
@@ -157,6 +168,7 @@ def ensure_raw_ocr_outputs(
     ocr_client: DeepseekOCRClient,
     images: Sequence[Image.Image],
     raw_output_dir: str,
+    input_image_dir: str,
     page_numbers: Sequence[int],
     ocr_workers: int,
 ) -> None:
@@ -172,6 +184,7 @@ def ensure_raw_ocr_outputs(
             write_raw_ocr_outputs(raw_output_dir, page_number, "", "")
             return
 
+        save_ocr_input_image(input_image_dir, page_number, image)
         content = ocr_client.infer_image(image)
         write_raw_ocr_outputs(raw_output_dir, page_number, content, "")
 
@@ -203,6 +216,7 @@ class OCRMarkdownGenerator:
         image_output_dir: str,
         page_output_dir: str,
         raw_output_dir: Optional[str] = None,
+        input_image_dir: Optional[str] = None,
         bold_texts: Optional[List[str]] = None,
     ) -> str:
         page_markdown_path = Path(page_output_dir) / f"page_{page_number:04d}.md"
@@ -216,6 +230,8 @@ class OCRMarkdownGenerator:
             page_markdown_path.write_text("", encoding="utf-8")
             return ""
 
+        if input_image_dir:
+            save_ocr_input_image(input_image_dir, page_number, image)
         content = self.ocr_client.infer_image(image)
         if raw_output_dir:
             write_raw_ocr_outputs(raw_output_dir, page_number, content, "")
