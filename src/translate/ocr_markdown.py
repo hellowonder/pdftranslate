@@ -12,7 +12,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from translate_service import configure_openai
-from ocr_client import DeepseekOCRClient, encode_image_data_url_for_ocr
+from ocr_client import DeepseekOCRClient
 from ocr_postprocess import process_ocr_page_content
 from ocr_pdf_bold_styles import apply_bold_texts_to_markdown, extract_bold_text_by_page
 from ocr_pdf_images import pdf_to_images_high_quality, resolve_page_numbers
@@ -172,8 +172,7 @@ def ensure_raw_ocr_outputs(
             write_raw_ocr_outputs(raw_output_dir, page_number, "", "")
             return
 
-        data_url = encode_image_data_url_for_ocr(image)
-        content = ocr_client.infer(data_url=data_url)
+        content = ocr_client.infer_image(image)
         write_raw_ocr_outputs(raw_output_dir, page_number, content, "")
 
     max_workers = min(max(1, ocr_workers), len(page_jobs))
@@ -217,8 +216,7 @@ class OCRMarkdownGenerator:
             page_markdown_path.write_text("", encoding="utf-8")
             return ""
 
-        data_url = encode_image_data_url_for_ocr(image)
-        content = self.ocr_client.infer(data_url=data_url)
+        content = self.ocr_client.infer_image(image)
         if raw_output_dir:
             write_raw_ocr_outputs(raw_output_dir, page_number, content, "")
 
@@ -260,7 +258,6 @@ def is_nearly_blank_page(
             if pixels[x, y] < white_threshold:  # type: ignore
                 non_white_pixels += 1
     return (non_white_pixels / max(1, total_pixels)) <= non_white_ratio_threshold
-
 
 def init_ocr_client(args: argparse.Namespace) -> DeepseekOCRClient:
     """

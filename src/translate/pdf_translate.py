@@ -105,8 +105,16 @@ def parse_args():
     parser.add_argument("--pages", help="Comma-separated 1-based page numbers or ranges to process, e.g. 1,3,5-7.")
     parser.add_argument(
         "--vllm-sleep",
+        dest="vllm_sleep",
         action="store_true",
+        default=True,
         help="Call wake_up/sleep control endpoints around OCR and translation model requests. This is for vllm to release GPU memory between stages and can be helpful for large models on limited hardware.",
+    )
+    parser.add_argument(
+        "--no-vllm-sleep",
+        dest="vllm_sleep",
+        action="store_false",
+        help="Disable wake_up/sleep control endpoint calls around OCR and translation.",
     )
     parser.add_argument(
         "--ocr-base-url",
@@ -157,8 +165,16 @@ def parse_args():
     parser.add_argument("--layout-workers", type=int, default=8, help="Parallel workers for PDF layout rendering.")
     parser.add_argument(
         "--generate-interleave-pdf",
+        dest="generate_interleave_pdf",
         action="store_true",
+        default=True,
         help="Generate the interleaved PDF that alternates translated pages with original pages.",
+    )
+    parser.add_argument(
+        "--no-generate-interleave-pdf",
+        dest="generate_interleave_pdf",
+        action="store_false",
+        help="Disable generation of the interleaved PDF.",
     )
     parser.add_argument("--no-translation", action="store_true", help="whether skip translation")
     parser.add_argument(

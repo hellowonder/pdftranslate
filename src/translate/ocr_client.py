@@ -10,6 +10,7 @@ DEFAULT_OCR_PROMPT = "<image>\n<|grounding|>Convert the document to markdown."
 DEFAULT_LAYOUT_PROMPT = "<image>\n<|grounding|>Given the layout of the image."
 DEFAULT_OCR_IMAGE_MAX_SIDE = 640
 DEFAULT_OCR_MAX_RETRIES = 3
+OCR_FAILURE_PREFIX = "【OCR "
 
 
 def looks_invalid_ocr_output(text: str) -> bool:
@@ -91,6 +92,7 @@ class DeepseekOCRClient:
             }
         ]
         last_error: Exception | None = None
+        content = ""
         for _ in range(DEFAULT_OCR_MAX_RETRIES):
             try:
                 response = self.client.chat.completions.create(
@@ -100,12 +102,12 @@ class DeepseekOCRClient:
                 )
                 content = response.choices[0].message.content or ""
                 if looks_invalid_ocr_output(content):
-                    raise ValueError(f"OCR output looks invalid: {content!r}")
+                    content = "【OCR output looks invalid, possibly due to an incompatible prompt or unsupported multimodal endpoint.】"
+                    continue
                 return content
             except Exception as exc:
-                last_error = exc
-        assert last_error is not None
-        raise last_error
+                content = f"【OCR inference error: {exc}】"
+        return content
 
     def infer(
         self,
@@ -115,3 +117,95 @@ class DeepseekOCRClient:
             data_url=data_url,
             prompt=DEFAULT_OCR_PROMPT,
         )
+
+    def infer_image(
+        self,
+        image: Image.Image,
+    ) -> str:
+        content = self.infer(data_url=encode_image_data_url_for_ocr(image))
+        if not self._should_retry_with_body_crop(content):
+            return content
+
+        cropped = crop_main_text_region(image)
+        if cropped is None:
+            return content
+
+        cropped_content = self.infer(data_url=encode_image_data_url_for_ocr(cropped))
+        if self._should_retry_with_body_crop(cropped_content):
+            return content
+        return cropped_content
+
+    def _should_retry_with_body_crop(self, content: str) -> bool:
+        stripped = (content or "").strip()
+        if not stripped:
+            return True
+        if stripped.startswith(OCR_FAILURE_PREFIX):
+            return True
+        if looks_invalid_ocr_output(stripped):
+            return True
+        return False
+
+
+def crop_main_text_region(image: Image.Image) -> Image.Image | None:
+    grayscale = image.convert("L")
+    width, height = grayscale.size
+    pixels = grayscale.load()
+    threshold = 245
+    min_dark_per_row = max(2, width // 200)
+    min_dark_per_col = max(2, height // 200)
+
+    top = None
+    bottom = None
+    for y in range(height):
+        dark = 0
+        for x in range(width):
+            if pixels[x, y] < threshold:  # type: ignore[index]
+                dark += 1
+        if dark >= min_dark_per_row:
+            top = y
+            break
+    for y in range(height - 1, -1, -1):
+        dark = 0
+        for x in range(width):
+            if pixels[x, y] < threshold:  # type: ignore[index]
+                dark += 1
+        if dark >= min_dark_per_row:
+            bottom = y
+            break
+
+    left = None
+    right = None
+    for x in range(width):
+        dark = 0
+        for y in range(height):
+            if pixels[x, y] < threshold:  # type: ignore[index]
+                dark += 1
+        if dark >= min_dark_per_col:
+            left = x
+            break
+    for x in range(width - 1, -1, -1):
+        dark = 0
+        for y in range(height):
+            if pixels[x, y] < threshold:  # type: ignore[index]
+                dark += 1
+        if dark >= min_dark_per_col:
+            right = x
+            break
+
+    if None in (top, bottom, left, right):
+        return None
+    if bottom <= top or right <= left:
+        return None
+
+    pad_x = max(24, width // 40)
+    pad_y = max(24, height // 40)
+    crop_box = (
+        max(0, left - pad_x),
+        max(0, top - pad_y),
+        min(width, right + pad_x),
+        min(height, bottom + pad_y),
+    )
+    cropped = image.crop(crop_box)
+    if cropped.size == image.size:
+        return None
+    return cropped

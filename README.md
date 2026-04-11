@@ -7,7 +7,7 @@
 
 默认模型配置：
 
-- OCR：本地 Ollama `http://localhost:11434/v1` + `deepseek-ocr:3b`
+- OCR：本地 vLLM `http://localhost:8000/v1` + `deepseek-ai/DeepSeek-OCR`
 - Translation：本地 Ollama `http://localhost:11434/v1` + `gemma4:26b`
 
 项目要求使用仓库内虚拟环境：
@@ -19,7 +19,7 @@
 
 本地环境准备：
 
-1. OCR 服务需要本地运行 `vllm + deepseek-ai/DeepSeek-OCR`。测试时目前只能使用这种方式，`ollama + deepseek-ocr` 现在有兼容性问题。
+1. OCR 服务需要本地运行 `vllm + deepseek-ai/DeepSeek-OCR`。(测试时目前只能使用这种方式，`ollama + deepseek-ocr:3b` 现在有兼容性问题。)
 
 ```bash
 VLLM_SERVER_DEV_MODE=1 /home/wonder/src/DeepSeek-OCR/.vllm-env/bin/vllm serve \
@@ -45,7 +45,9 @@ VLLM_SERVER_DEV_MODE=1 /home/wonder/src/DeepSeek-OCR/.vllm-env/bin/vllm serve \
 常用参数：
 
 - `--pages`：只处理部分页，例如 `1,3,5-7`
-- `--generate-interleave-pdf`：额外输出交织版 PDF
+- `--no-generate-interleave-pdf`：关闭交织版 PDF 输出
+- `--vllm-sleep`：vLLM sleep/wake 控制，默认开启
+- `--no-vllm-sleep`：关闭 vLLM sleep/wake 控制
 - `--no-translation`：只跑 OCR，不做翻译
 - `--translation-workers`：翻译并发数
 - `--ocr-workers`：OCR 并发数
