@@ -104,14 +104,15 @@ def parse_args():
     parser.add_argument("--output-dir", required=True, help="Directory to store OCR, translation, and render outputs.")
     parser.add_argument("--pages", help="Comma-separated 1-based page numbers or ranges to process, e.g. 1,3,5-7.")
     parser.add_argument(
-        "--ocr-base-url",
-        default="http://localhost:11434/v1",
-        help="OpenAI-compatible OCR base URL, for example an Ollama endpoint.",
-    )
-    parser.add_argument(
         "--vllm-sleep",
         action="store_true",
-        help="Call wake_up/sleep control endpoints around OCR and translation model requests.",
+        help="Call wake_up/sleep control endpoints around OCR and translation model requests. This is for vllm to release GPU memory between stages and can be helpful for large models on limited hardware.",
+    )
+    parser.add_argument(
+        "--ocr-base-url",
+        # default="http://localhost:11434/v1",
+        default="http://localhost:8000/v1",
+        help="OpenAI-compatible OCR base URL, for example an Ollama endpoint.",
     )
     parser.add_argument(
         "--ocr-api-key",
@@ -120,7 +121,8 @@ def parse_args():
     )
     parser.add_argument(
         "--ocr-model",
-        default="deepseek-ocr:3b",
+        # default="deepseek-ocr:3b",
+        default="deepseek-ai/DeepSeek-OCR",
         help="OCR model name exposed by the OCR endpoint.",
     )
     parser.add_argument(
