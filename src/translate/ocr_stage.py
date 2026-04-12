@@ -12,11 +12,11 @@ import requests
 
 from ocr_markdown import (
     all_raw_ocr_outputs_exist,
-    apply_pdf_bold_marks,
     init_ocr_client,
     run_ocr_pages,
     write_processed_ocr_pages,
 )
+from ocr_pdf_bold_styles import apply_pdf_bold_marks
 from ocr_pdf_images import pdf_to_images_high_quality
 from paged_markdown_io import page_markdown_outputs_exist, read_page_markdown_files, write_paged_markdown_document
 from translate_page_merge import BoundaryDecision, merge_cross_page_paragraphs

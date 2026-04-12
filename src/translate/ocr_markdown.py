@@ -10,7 +10,6 @@ from PIL import Image
 from tqdm import tqdm
 
 from ocr_client import OCRClient, OCRPageRequest, init_ocr_client
-from ocr_pdf_bold_styles import apply_bold_texts_to_markdown, extract_bold_text_by_page
 from ocr_pdf_images import pdf_to_images_high_quality, resolve_page_numbers
 from paged_markdown_io import read_page_markdown_files, write_page_markdown
 
@@ -119,25 +118,6 @@ def discover_page_numbers_from_stage_dir(stage_dir: str, suffix: str = ".md") ->
     return page_numbers
 
 
-def apply_pdf_bold_marks(
-    pdf_path: str,
-    page_numbers: List[int],
-    pages: List[str],
-) -> List[str]:
-    try:
-        bold_texts_by_page = extract_bold_text_by_page(pdf_path, page_numbers)
-    except Exception:
-        bold_texts_by_page = {}
-    final_pages: List[str] = []
-    for page_number, content in zip(page_numbers, pages):
-        processed_content = content
-        bold_texts = bold_texts_by_page.get(page_number, [])
-        if bold_texts:
-            processed_content = apply_bold_texts_to_markdown(processed_content, bold_texts)
-        final_pages.append(processed_content)
-    return final_pages
-
-
 def run_ocr_pages(
     ocr_client: OCRClient,
     images: Sequence[Image.Image],
@@ -196,59 +176,6 @@ def run_ocr_pages(
 def write_processed_ocr_pages(page_output_dir: str, page_numbers: Sequence[int], pages: Sequence[str]) -> None:
     for page_number, page_content in zip(page_numbers, pages):
         write_page_markdown(page_output_dir, page_number, page_content)
-
-
-@dataclass
-class OCRMarkdownGenerator:
-    ocr_client: OCRClient
-    pdf_loader: Callable[[str, int, Optional[List[int]]], List[Image.Image]] = pdf_to_images_high_quality
-    ocr_workers: int = 8
-
-    def handle_page(
-        self,
-        page_number: int,
-        image: Image.Image,
-        image_output_dir: str,
-        page_output_dir: str,
-        raw_output_dir: Optional[str] = None,
-        input_image_dir: Optional[str] = None,
-        bold_texts: Optional[List[str]] = None,
-    ) -> str:
-        page_markdown_path = Path(page_output_dir) / f"page_{page_number:04d}.md"
-        if page_markdown_path.exists() and (not raw_output_dir or raw_ocr_outputs_exist(raw_output_dir, page_number)):
-            return page_markdown_path.read_text(encoding="utf-8")
-
-        if is_nearly_blank_page(image):
-            if raw_output_dir:
-                write_raw_ocr_output(raw_output_dir, page_number, "")
-            page_markdown_path.parent.mkdir(parents=True, exist_ok=True)
-            page_markdown_path.write_text("", encoding="utf-8")
-            return ""
-
-        if input_image_dir:
-            save_ocr_input_image(input_image_dir, page_number, image)
-        result = self.ocr_client.recognize_page(
-            OCRPageRequest(
-                page_number=page_number,
-                image=image,
-                image_output_dir=image_output_dir,
-            )
-        )
-        if raw_output_dir:
-            write_raw_ocr_output(raw_output_dir, page_number, result.raw_text)
-
-        processed_content = result.markdown
-        if bold_texts:
-            processed_content = apply_bold_texts_to_markdown(processed_content, bold_texts)
-        page_markdown_path.parent.mkdir(parents=True, exist_ok=True)
-        page_markdown_path.write_text(processed_content, encoding="utf-8")
-        return processed_content
-
-    def extract_bold_texts_by_page(self, pdf_path: str, page_numbers: List[int]) -> Dict[int, List[str]]:
-        try:
-            return extract_bold_text_by_page(pdf_path, page_numbers)
-        except Exception:
-            return {}
 
 
 def is_nearly_blank_page(
