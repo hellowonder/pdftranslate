@@ -12,7 +12,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from translate_service import configure_openai
-from ocr_client import DeepseekOCRClient, resize_image_for_ocr
+from ocr_client import DeepseekOCRClient
 from ocr_postprocess import process_ocr_page_content
 from ocr_pdf_bold_styles import apply_bold_texts_to_markdown, extract_bold_text_by_page
 from ocr_pdf_images import pdf_to_images_high_quality, resolve_page_numbers
@@ -99,7 +99,7 @@ def save_ocr_input_image(input_image_dir: str, page_number: int, image: Image.Im
     path = build_ocr_input_image_path(input_image_dir, page_number)
     path.parent.mkdir(parents=True, exist_ok=True)
     # Save the exact resized image that will be sent to OCR for debugging and reuse.
-    resize_image_for_ocr(image).save(path, format="PNG")
+    image.save(path, format="PNG")
 
 
 def raw_ocr_outputs_exist(raw_output_dir: str, page_number: int) -> bool:

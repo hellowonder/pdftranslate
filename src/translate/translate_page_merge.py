@@ -115,13 +115,15 @@ def _looks_like_short_title(text: str) -> bool:
     return len(title_case_words) >= max(1, len(alpha_words) - 1)
 
 
-def _ends_with_block_latex(text: str) -> bool:
+def _ends_with_latex(text: str) -> bool:
     stripped = (text or "").strip()
     if not stripped:
         return False
-    if stripped.endswith("$$"):
+    if stripped.endswith("$"):
         return True
     if stripped.endswith(r"\]"):
+        return True
+    if stripped.endswith(r"\)"):
         return True
     return bool(re.search(r"\\end\{[a-zA-Z*]+\}\s*$", stripped))
 
@@ -170,12 +172,15 @@ def decide_page_boundary_merge(
     right_stripped = (right_block or "").strip()
     if not left_stripped or not right_stripped:
         return "SPLIT"
+    
+    if not right_stripped[0].islower() and right_stripped[0] not in OPENING_PUNCTUATION:
+        return "SPLIT"
 
     if _looks_like_special_block_start(right_stripped):
         return "SPLIT"
     if _looks_like_markdown_heading_line(_last_line(left_stripped)):
         return "SPLIT"
-    if _ends_with_block_latex(left_stripped):
+    if _ends_with_latex(left_stripped):
         return "SPLIT"
     if _looks_like_short_title(left_stripped):
         return "SPLIT"

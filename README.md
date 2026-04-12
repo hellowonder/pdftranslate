@@ -21,12 +21,18 @@
 
 1. OCR 服务需要本地运行 `vllm + deepseek-ai/DeepSeek-OCR`。(测试时目前只能使用这种方式，`ollama + deepseek-ocr:3b` 现在有兼容性问题。)
 
+假设在```.vllm-env```中安装vllm。
+
 ```bash
 VLLM_SERVER_DEV_MODE=1 ./.vllm-env/bin/vllm serve \
         deepseek-ai/DeepSeek-OCR \
+        --logits_processors vllm.model_executor.models.deepseek_ocr:NGramPerReqLogitsProcessor \
+        --no-enable-prefix-caching --mm-processor-cache-gb 0 \
         --enable-sleep-mode \
         --port 8000
 ```
+
+建议保留 `--logits_processors vllm.model_executor.models.deepseek_ocr:NGramPerReqLogitsProcessor`，否则可能出现 OCR 输出重复或陷入循环的问题。
 
 2. Translation 服务需要本地运行 `ollama + gemma4:26b`。
 

@@ -8,11 +8,13 @@ from PIL import Image
 from llm_util import has_low_diversity_or_repetition
 
 DEFAULT_OCR_PROMPT = "<image>\n<|grounding|>Convert the document to markdown."
+DEFAULT_OCR_PROMPT2 = "<image>\n<|grounding|>Convert the document to markdown" # change prompt to avoid cache hit
 DEFAULT_LAYOUT_PROMPT = "<image>\n<|grounding|>Given the layout of the image."
 DEFAULT_OCR_IMAGE_MAX_SIDE = 640
 DEFAULT_OCR_MAX_RETRIES = 3
 OCR_FAILURE_PREFIX = "【OCR "
 COORDINATE_PATTERN = re.compile(r"\[\[(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+\s*)\]\]")
+REPEATED_NUMBERING_PATTERN = re.compile(r"(?:^|\s)(?:\d+\.\s*){40,}")
 
 
 def looks_invalid_ocr_output(text: str) -> bool:
@@ -28,22 +30,24 @@ def looks_invalid_ocr_output(text: str) -> bool:
     alpha_numeric_count = sum(ch.isalnum() for ch in stripped)
     if alpha_numeric_count == 0:
         return True
+    if REPEATED_NUMBERING_PATTERN.search(stripped):
+        return True
     if has_low_diversity_or_repetition(stripped):
         return True
     return False
 
 
-def resize_image_for_ocr(image: Image.Image, max_side: int = DEFAULT_OCR_IMAGE_MAX_SIDE) -> Image.Image:
-    """
-    Resize an image to the OCR model's preferred working size while preserving aspect ratio.
-    """
-    if max_side <= 0:
-        return image.copy()
-    resized = image.convert("RGB")
-    if max(resized.size) <= max_side:
-        return resized
-    resized.thumbnail((max_side, max_side))
-    return resized
+# def resize_image_for_ocr(image: Image.Image, max_side: int = DEFAULT_OCR_IMAGE_MAX_SIDE) -> Image.Image:
+#     """
+#     Resize an image to the OCR model's preferred working size while preserving aspect ratio.
+#     """
+#     if max_side <= 0:
+#         return image.copy()
+#     resized = image.convert("RGB")
+#     if max(resized.size) <= max_side:
+#         return resized
+#     resized.thumbnail((max_side, max_side))
+#     return resized
 
 
 def encode_image_to_data_url(image: Image.Image) -> str:
@@ -54,17 +58,6 @@ def encode_image_to_data_url(image: Image.Image) -> str:
     image.save(buffer, format="PNG")
     encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{encoded}"
-
-
-def encode_image_data_url_for_ocr(
-    image: Image.Image,
-    max_side: int = DEFAULT_OCR_IMAGE_MAX_SIDE,
-) -> str:
-    """
-    Resize the image for OCR and encode it as a PNG data URL.
-    """
-    return encode_image_to_data_url(resize_image_for_ocr(image, max_side=max_side))
-
 
 class DeepseekOCRClient:
     """
@@ -79,8 +72,7 @@ class DeepseekOCRClient:
         self.client = client
         self.model = model
 
-    def _infer_with_retry(self, image: Image.Image, prompt: str) -> str:
-        data_url = encode_image_data_url_for_ocr(image)
+    def _infer_with_retry(self, prompt: str, data_url: str) -> tuple[str, bool]:
         messages = [
             {
                 "role": "user",
@@ -90,7 +82,6 @@ class DeepseekOCRClient:
                 ]
             }
         ]
-        content = ""
         for _ in range(DEFAULT_OCR_MAX_RETRIES):
             try:
                 response = self.client.chat.completions.create(
@@ -99,36 +90,48 @@ class DeepseekOCRClient:
                     temperature=0.0,
                 )
                 content = response.choices[0].message.content or ""
+                return content, True
             except Exception as exc:
                 print(f"OCR inference error: {exc}")
                 continue
-        return content
-    
-    def infer_with_prompt(
-        self,
-        image: Image.Image,
-        prompt: str,
-    ) -> str:
-        content = self._infer_with_retry(image, prompt)
-        
-        if looks_invalid_ocr_output(content):
-            crop_result = crop_main_text_region(image)
-            if crop_result is not None:
-                crop, crop_box = crop_result
-                cropped_content = self._infer_with_retry(crop, prompt)
-                return remap_ocr_coordinates_to_original(
-                    cropped_content,
-                    original_size=image.size,
-                    crop_box=crop_box,
-                )
-
-        return content
+        return "", False
 
     def infer_image(
         self,
         image: Image.Image,
     ) -> str:
-        return self.infer_with_prompt(image, DEFAULT_OCR_PROMPT)
+        data_url = encode_image_to_data_url(image)
+        content, suc = self._infer_with_retry(DEFAULT_OCR_PROMPT, data_url)
+        if not suc:  # exception during inference.
+            return content
+
+        is_valid = not looks_invalid_ocr_output(content)        
+        if not is_valid:
+            # change prompt and retry to avoid cache hit on broken output
+            print("Initial OCR output looks invalid, retrying with alternative prompt...")
+            content, suc = self._infer_with_retry(DEFAULT_OCR_PROMPT2, data_url)
+            if not suc:  # exception during inference.
+                return content
+            is_valid = not looks_invalid_ocr_output(content)
+        
+        if not is_valid:
+            # still invalid after retry, try cropping and remapping coordinates
+            print("OCR output still looks invalid, attempting to crop and re-map coordinates...")
+            crop_result = crop_main_text_region(image)
+            if crop_result is not None:
+                print(f"Original image size: {image.size}, Cropped image size: {crop_result[0].size}")
+                crop, crop_box = crop_result
+                cropped_data_url = encode_image_to_data_url(crop)
+                cropped_content, suc = self._infer_with_retry(DEFAULT_OCR_PROMPT, cropped_data_url)
+                if suc and not looks_invalid_ocr_output(cropped_content):
+                    return remap_ocr_coordinates_to_original(
+                        cropped_content,
+                        original_size=image.size,
+                        crop_box=crop_box,
+                    )
+            return ""
+
+        return content
 
 def crop_main_text_region(image: Image.Image) -> tuple[Image.Image, tuple[int, int, int, int]] | None:
     grayscale = image.convert("L")

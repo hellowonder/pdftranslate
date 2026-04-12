@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "pdf_translate: one_page",
+      "type": "python",
+      "request": "launch",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "program": "${workspaceFolder}/src/translate/pdf_translate.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--input",
+        "tests/data/one_page.pdf",
+        "--output-dir",
+        "tests/data/output/one_page",
+        "--clear"
+      ]
+    },
+    {
+      "name": "pdf_translate: one_page OCR only",
+      "type": "python",
+      "request": "launch",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "program": "${workspaceFolder}/src/translate/pdf_translate.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--input",
+        "tests/data/book.pdf",
+        "--pages", "11",
+        "--output-dir",
+        "tests/data/output/one_page_ocr_only",
+        "--clear",
+        "--stages",
+        "ocr"
+      ]
+    }
+  ]
+}
