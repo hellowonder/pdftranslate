@@ -12,10 +12,9 @@ import requests
 
 from ocr_markdown import (
     all_raw_ocr_outputs_exist,
-    ensure_raw_ocr_outputs,
+    apply_pdf_bold_marks,
     init_ocr_client,
-    process_final_ocr_pages,
-    raw_ocr_outputs_exist,
+    run_ocr_pages,
     write_processed_ocr_pages,
 )
 from ocr_pdf_images import pdf_to_images_high_quality
@@ -96,6 +95,7 @@ def run_markdown_merge_page_break_step(
 def run_ocr_stage(args: argparse.Namespace, output_paths: dict[str, str], page_numbers: List[int]) -> None:
     manage_vllm_lifecycle = should_manage_vllm_ocr_lifecycle(args, output_paths, page_numbers)
     images = None
+    processed_pages: List[str] | None = None
     if not all_raw_ocr_outputs_exist(output_paths["ocr_raw_dir"], page_numbers):
         # Rasterize the target PDF pages into in-memory page images used by OCR and later OCR postprocess.
         # Output: no file written here; returns page images for downstream steps.
@@ -106,15 +106,16 @@ def run_ocr_stage(args: argparse.Namespace, output_paths: dict[str, str], page_n
         )
 
         # Run expensive OCR inference only for pages whose raw outputs are missing.
-        # Output: ocr/ocr_raw/page_XXXX.md and ocr/ocr_raw/page_XXXX.layout.md
+        # Output: ocr/ocr_raw/page_XXXX.md
         if manage_vllm_lifecycle:
             notify_vllm_control_endpoint(args.ocr_base_url, "wake_up")
         try:
-            ensure_raw_ocr_outputs(
+            processed_pages = run_ocr_pages(
                 ocr_client=init_ocr_client(args),
                 images=images,
                 raw_output_dir=output_paths["ocr_raw_dir"],
                 input_image_dir=output_paths["ocr_input_images_dir"],
+                image_output_dir=output_paths["ocr_images_dir"],
                 page_numbers=page_numbers,
                 ocr_workers=args.ocr_workers,
             )
@@ -135,17 +136,18 @@ def run_ocr_stage(args: argparse.Namespace, output_paths: dict[str, str], page_n
                 dpi=args.ocr_dpi,
                 page_numbers=page_numbers,
             )
-        # Convert raw OCR outputs into cleaned per-page markdown, including cropped images under ocr/images/.
-        # Output: ocr/images/* (and in-memory processed pages before page-break merge)
-        processed_pages = process_final_ocr_pages(
-            pdf_path=output_paths["input_pdf"],
-            image_output_dir=output_paths["ocr_images_dir"],
-            page_output_dir=output_paths["ocr_dir"],
-            raw_output_dir=output_paths["ocr_raw_dir"],
-            page_numbers=page_numbers,
-            images=images,
-            write_pages=False,
-        )
+        # Convert raw OCR outputs into page markdown, including cropped images under ocr/images/.
+        if processed_pages is None:
+            processed_pages = run_ocr_pages(
+                ocr_client=init_ocr_client(args),
+                images=images,
+                raw_output_dir=output_paths["ocr_raw_dir"],
+                input_image_dir=output_paths["ocr_input_images_dir"],
+                image_output_dir=output_paths["ocr_images_dir"],
+                page_numbers=page_numbers,
+                ocr_workers=args.ocr_workers,
+            )
+        processed_pages = apply_pdf_bold_marks(output_paths["input_pdf"], page_numbers, processed_pages)
 
         # Resolve paragraph continuation across page breaks and persist the final page-level OCR markdown.
         # Output: ocr/page_XXXX.md and ocr/<base>_page_merge.json

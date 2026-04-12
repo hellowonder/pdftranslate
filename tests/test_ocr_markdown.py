@@ -13,7 +13,7 @@ if str(TRANSLATE_SRC) not in sys.path:
 
 from ocr_markdown import init_ocr_client, is_nearly_blank_page  # noqa: E402
 from ocr_client import resize_image_for_ocr  # noqa: E402
-from ocr_postprocess import process_ocr_page_content  # noqa: E402
+from ocr_deepseek_postprocess import build_deepseek_page_markdown  # noqa: E402
 
 
 class OCRMarkdownBlankPageTest(unittest.TestCase):
@@ -49,10 +49,10 @@ Top paragraph.
 Bottom paragraph.
 """
         output_dir = PROJECT_ROOT / "tests" / "data" / "output" / "grounded_images"
-        markdown = process_ocr_page_content(
-            grounded,
-            image,
-            str(output_dir),
+        markdown = build_deepseek_page_markdown(
+            raw_text=grounded,
+            image=image,
+            image_output_dir=str(output_dir),
             page_number=1,
         )
         self.assertIn("Top paragraph.\n\n![](images/1_0.jpg)\n\nFigure 1.2.10. Caption text.\n\nBottom paragraph.", markdown)
@@ -69,10 +69,10 @@ The equation is
 <|ref|>text<|/ref|><|det|>[[100, 280, 900, 360]]<|/det|>
 Done.
 """
-        markdown = process_ocr_page_content(
-            grounded,
-            image,
-            str(PROJECT_ROOT / "tests" / "data" / "output" / "grounded_images"),
+        markdown = build_deepseek_page_markdown(
+            raw_text=grounded,
+            image=image,
+            image_output_dir=str(PROJECT_ROOT / "tests" / "data" / "output" / "grounded_images"),
             page_number=2,
         )
         self.assertIn("The equation is", markdown)
@@ -88,10 +88,10 @@ Done.
 
 Trailing paragraph after grounded block.
 """
-        markdown = process_ocr_page_content(
-            grounded,
-            image,
-            str(PROJECT_ROOT / "tests" / "data" / "output" / "grounded_images"),
+        markdown = build_deepseek_page_markdown(
+            raw_text=grounded,
+            image=image,
+            image_output_dir=str(PROJECT_ROOT / "tests" / "data" / "output" / "grounded_images"),
             page_number=3,
         )
         self.assertIn("Leading paragraph before grounded block.", markdown)
@@ -107,10 +107,10 @@ Trailing paragraph after grounded block.
 
 After.
 """
-        markdown = process_ocr_page_content(
-            grounded,
-            image,
-            str(PROJECT_ROOT / "tests" / "data" / "output" / "grounded_images"),
+        markdown = build_deepseek_page_markdown(
+            raw_text=grounded,
+            image=image,
+            image_output_dir=str(PROJECT_ROOT / "tests" / "data" / "output" / "grounded_images"),
             page_number=4,
         )
         self.assertEqual(markdown, "Before.\n\n\\[x^2 + y^2 = 1\\]\n\nAfter.")
@@ -124,8 +124,8 @@ class OCRMarkdownClientInitTest(unittest.TestCase):
             ocr_model="deepseek-ocr:3b",
         )
 
-        with patch("ocr_markdown.configure_openai", return_value="client") as mocked_configure, patch(
-            "ocr_markdown.DeepseekOCRClient"
+        with patch("ocr_client.configure_openai", return_value="client") as mocked_configure, patch(
+            "ocr_client_deepseek.DeepseekOCRClient"
         ) as mocked_client:
             init_ocr_client(args)
 

@@ -13,8 +13,8 @@ if str(TRANSLATE_SRC) not in sys.path:
     sys.path.insert(0, str(TRANSLATE_SRC))
 
 from translate_service import configure_openai  # noqa: E402
-from ocr_client import DeepseekOCRClient, looks_invalid_ocr_output  # noqa: E402
-from ocr_postprocess import process_ocr_page_content  # noqa: E402
+from ocr_client import OCRPageRequest, looks_invalid_ocr_output  # noqa: E402
+from ocr_client_deepseek import DeepseekOCRClient  # noqa: E402
 
 
 class OCRClientIntegrationTest(unittest.TestCase):
@@ -65,7 +65,6 @@ class OCRClientIntegrationTest(unittest.TestCase):
             self.skipTest(f"Missing OCR fixture image: {image_path}")
         output_dir = PROJECT_ROOT / "tests" / "data" / "output"
         output_path = output_dir / "test_page_14_page_0001.md"
-        layout_output_path = output_dir / "test_page_14_page_0001.layout.md"
         image_assets_dir = output_dir / "images"
 
         ocr_base_url = os.environ.get("OCR_BASE_URL", "http://localhost:11434/v1")
@@ -76,21 +75,19 @@ class OCRClientIntegrationTest(unittest.TestCase):
         )
 
         with Image.open(image_path) as image:
-            from ocr_client import encode_image_data_url_for_ocr  # noqa: E402
-
-            raw_markdown = client.infer(encode_image_data_url_for_ocr(image))
-            markdown = process_ocr_page_content(
-                raw_markdown,
-                image,
-                str(image_assets_dir),
-                page_number=1,
+            result = client.recognize_page(
+                OCRPageRequest(
+                    page_number=1,
+                    image=image,
+                    image_output_dir=str(image_assets_dir),
+                )
             )
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(markdown, encoding="utf-8")
-        layout_output_path.write_text(raw_markdown, encoding="utf-8")
+        output_path.write_text(result.markdown, encoding="utf-8")
 
-        self.assertTrue(markdown.strip())
+        self.assertTrue(result.raw_text.strip())
+        self.assertTrue(result.markdown.strip())
         self.assertTrue(output_path.exists())
 
 

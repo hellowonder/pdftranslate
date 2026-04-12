@@ -182,7 +182,8 @@ flowchart LR
 - [`src/translate/pdf_translate.py`](/home/wonder/dev/pdftranslate/src/translate/pdf_translate.py)
 - [`src/translate/ocr_markdown.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_markdown.py)
 - [`src/translate/ocr_client.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_client.py)
-- [`src/translate/ocr_postprocess.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_postprocess.py)
+- [`src/translate/ocr_client_deepseek.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_client_deepseek.py)
+- [`src/translate/ocr_deepseek_postprocess.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_deepseek_postprocess.py)
 - [`src/translate/ocr_pdf_images.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_pdf_images.py)
 - [`src/translate/translate_page_merge.py`](/home/wonder/dev/pdftranslate/src/translate/translate_page_merge.py)
 
@@ -232,16 +233,14 @@ OCR stage 还会输出辅助文件：
   - 内容：从 PDF 页面中裁剪出的图片资源。
   - 用途：translation stage 会拷贝到 `translate/images/`，render stage 最终消费的是译文目录中的图片。
 - `ocr/ocr_raw/page_XXXX.md`
-  - 内容：原始 OCR 文本。
-- `ocr/ocr_raw/page_XXXX.layout.md`
-  - 内容：带布局信息的 OCR 原始文本。
+  - 内容：原始 OCR 文本，可能包含 grounded/layout 标记。
 
 ### 增量执行与跳过逻辑
 
 OCR stage 不要求“缺一个文件就整阶段重跑”，而是采用两层补齐逻辑：
 
 1. 页级补齐
-   - 如果某页缺失 `ocr/ocr_raw/page_XXXX.md` 或 `ocr/ocr_raw/page_XXXX.layout.md`，则只补跑这一页的 OCR 原始产物。
+   - 如果某页缺失 `ocr/ocr_raw/page_XXXX.md`，则只补跑这一页的 OCR 原始产物。
    - 如果某页缺失 `ocr/page_XXXX.md`，则在拥有完整页级原料后重新生成该页最终 Markdown。
 2. 聚合文件重建
    - 如果所有目标页的 `ocr/page_XXXX.md` 都存在，但 `ocr/<base>_original.md` 缺失，则只从页文件重建总 Markdown。
@@ -484,7 +483,7 @@ Render stage 的三个 PDF 输出彼此独立：
 
 | 阶段 | 必需输入文件 | 核心输出文件 | 辅助输出文件 |
 | --- | --- | --- | --- |
-| OCR | `--input` 指向的原始 PDF | `ocr/<base>_original.md`、`ocr/page_XXXX.md` | `ocr/<base>_ocr.json`、`ocr/images/*`、`ocr/ocr_raw/page_XXXX.md`、`ocr/ocr_raw/page_XXXX.layout.md` |
+| OCR | `--input` 指向的原始 PDF | `ocr/<base>_original.md`、`ocr/page_XXXX.md` | `ocr/<base>_ocr.json`、`ocr/images/*`、`ocr/ocr_raw/page_XXXX.md` |
 | Translation | `ocr/<base>_original.md`、`ocr/page_XXXX.md`、`ocr/images/*` | `translate/<base>_cn.md`、`translate/page_XXXX_cn.md` | `translate/images/*` |
 | Render | `ocr/<base>_original.md`、`translate/<base>_cn.md`、`translate/page_XXXX_cn.md`、`translate/images/*`、原始 PDF | `render/<base>_original.pdf`、`render/<base>_cn.pdf` | `render/<base>_interleaved.pdf` |
 
@@ -500,7 +499,8 @@ Render stage 的三个 PDF 输出彼此独立：
 
 1. [`src/translate/pdf_translate.py`](/home/wonder/dev/pdftranslate/src/translate/pdf_translate.py)
 2. [`src/translate/ocr_markdown.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_markdown.py)
-3. [`src/translate/ocr_postprocess.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_postprocess.py)
+3. [`src/translate/ocr_client_deepseek.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_client_deepseek.py)
+4. [`src/translate/ocr_deepseek_postprocess.py`](/home/wonder/dev/pdftranslate/src/translate/ocr_deepseek_postprocess.py)
 4. [`src/translate/translate_page_merge.py`](/home/wonder/dev/pdftranslate/src/translate/translate_page_merge.py)
 5. [`src/translate/translate_service.py`](/home/wonder/dev/pdftranslate/src/translate/translate_service.py)
 6. [`src/translate/render_pandoc.py`](/home/wonder/dev/pdftranslate/src/translate/render_pandoc.py)

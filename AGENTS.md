@@ -2,6 +2,13 @@
 - Use the project virtual environment at `./.venv`.
 - Run Python and pip via `./.venv/bin/python` and `./.venv/bin/pip` instead of the system interpreter.
 
+## model environment
+This project need backend serving LLM. By default, you can think there are two services running already:
+- ollama running at: http://localhost:11434/v1, serving multiple models.
+- vllm running at: http://localhost:8000/v1, serving model "deepseek-ai/DeepSeek-OCR"
+
+Don't try to start or stop these backend model services.
+
 ## repo rules
 - Do not create a git commit automatically after completing code or document changes. Only create a commit when the user explicitly asks for one.
 - when writing design docs, use Mermaid diagrams when it can clarify things better.

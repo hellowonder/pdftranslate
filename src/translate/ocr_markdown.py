@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import itertools
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,9 +9,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 from PIL import Image
 from tqdm import tqdm
 
-from translate_service import configure_openai
-from ocr_client import DeepseekOCRClient
-from ocr_postprocess import process_ocr_page_content
+from ocr_client import OCRClient, OCRPageRequest, init_ocr_client
 from ocr_pdf_bold_styles import apply_bold_texts_to_markdown, extract_bold_text_by_page
 from ocr_pdf_images import pdf_to_images_high_quality, resolve_page_numbers
 from paged_markdown_io import read_page_markdown_files, write_page_markdown
@@ -83,12 +79,9 @@ def load_ocr_stage_outputs(
     return MarkdownExtractionResult(markdown_pages, page_numbers, images)
 
 
-def build_raw_ocr_output_paths(raw_output_dir: str, page_number: int) -> tuple[Path, Path]:
+def build_raw_ocr_output_path(raw_output_dir: str, page_number: int) -> Path:
     raw_dir = Path(raw_output_dir)
-    return (
-        raw_dir / f"page_{page_number:04d}.md",
-        raw_dir / f"page_{page_number:04d}.layout.md",
-    )
+    return raw_dir / f"page_{page_number:04d}.md"
 
 
 def build_ocr_input_image_path(input_image_dir: str, page_number: int) -> Path:
@@ -103,19 +96,17 @@ def save_ocr_input_image(input_image_dir: str, page_number: int, image: Image.Im
 
 
 def raw_ocr_outputs_exist(raw_output_dir: str, page_number: int) -> bool:
-    raw_path, layout_path = build_raw_ocr_output_paths(raw_output_dir, page_number)
-    return raw_path.exists() and layout_path.exists()
+    return build_raw_ocr_output_path(raw_output_dir, page_number).exists()
 
 
 def all_raw_ocr_outputs_exist(raw_output_dir: str, page_numbers: Sequence[int]) -> bool:
     return all(raw_ocr_outputs_exist(raw_output_dir, page_number) for page_number in page_numbers)
 
 
-def write_raw_ocr_outputs(raw_output_dir: str, page_number: int, content: str, layout_content: str) -> None:
-    raw_path, layout_path = build_raw_ocr_output_paths(raw_output_dir, page_number)
+def write_raw_ocr_output(raw_output_dir: str, page_number: int, content: str) -> None:
+    raw_path = build_raw_ocr_output_path(raw_output_dir, page_number)
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     raw_path.write_text(content, encoding="utf-8")
-    layout_path.write_text(layout_content, encoding="utf-8")
 
 
 def discover_page_numbers_from_stage_dir(stage_dir: str, suffix: str = ".md") -> List[int]:
@@ -128,74 +119,78 @@ def discover_page_numbers_from_stage_dir(stage_dir: str, suffix: str = ".md") ->
     return page_numbers
 
 
-def process_final_ocr_pages(
+def apply_pdf_bold_marks(
     pdf_path: str,
-    image_output_dir: str,
-    page_output_dir: str,
-    raw_output_dir: str,
     page_numbers: List[int],
-    images: List[Image.Image],
-    write_pages: bool = True,
+    pages: List[str],
 ) -> List[str]:
     try:
         bold_texts_by_page = extract_bold_text_by_page(pdf_path, page_numbers)
     except Exception:
         bold_texts_by_page = {}
     final_pages: List[str] = []
-    for page_number, image in zip(page_numbers, images):
-        raw_path, layout_path = build_raw_ocr_output_paths(raw_output_dir, page_number)
-        content = raw_path.read_text(encoding="utf-8")
-        layout_content = layout_path.read_text(encoding="utf-8")
-        processed_content = process_ocr_page_content(
-            content,
-            image,
-            image_output_dir,
-            page_number,
-            layout_content=layout_content,
-        )
+    for page_number, content in zip(page_numbers, pages):
+        processed_content = content
         bold_texts = bold_texts_by_page.get(page_number, [])
         if bold_texts:
             processed_content = apply_bold_texts_to_markdown(processed_content, bold_texts)
-        if write_pages:
-            page_markdown_path = Path(page_output_dir) / f"page_{page_number:04d}.md"
-            page_markdown_path.parent.mkdir(parents=True, exist_ok=True)
-            page_markdown_path.write_text(processed_content, encoding="utf-8")
         final_pages.append(processed_content)
     return final_pages
 
 
-def ensure_raw_ocr_outputs(
-    ocr_client: DeepseekOCRClient,
+def run_ocr_pages(
+    ocr_client: OCRClient,
     images: Sequence[Image.Image],
     raw_output_dir: str,
     input_image_dir: str,
+    image_output_dir: str,
     page_numbers: Sequence[int],
     ocr_workers: int,
-) -> None:
+) -> List[str]:
     page_jobs = list(zip(page_numbers, images))
     if not page_jobs:
-        return
+        return []
+
+    page_results: dict[int, str] = {}
 
     def _handle_page(job: tuple[int, Image.Image]) -> None:
         page_number, image = job
         if raw_ocr_outputs_exist(raw_output_dir, page_number):
+            raw_text = build_raw_ocr_output_path(raw_output_dir, page_number).read_text(encoding="utf-8")
+            page_results[page_number] = ocr_client.build_markdown_from_raw(
+                OCRPageRequest(
+                    page_number=page_number,
+                    image=image,
+                    image_output_dir=image_output_dir,
+                ),
+                raw_text,
+            )
             return
         if is_nearly_blank_page(image):
-            write_raw_ocr_outputs(raw_output_dir, page_number, "", "")
+            write_raw_ocr_output(raw_output_dir, page_number, "")
+            page_results[page_number] = ""
             return
 
         save_ocr_input_image(input_image_dir, page_number, image)
-        content = ocr_client.infer_image(image)
-        write_raw_ocr_outputs(raw_output_dir, page_number, content, "")
+        result = ocr_client.recognize_page(
+            OCRPageRequest(
+                page_number=page_number,
+                image=image,
+                image_output_dir=image_output_dir,
+            )
+        )
+        write_raw_ocr_output(raw_output_dir, page_number, result.raw_text)
+        page_results[page_number] = result.markdown
 
     max_workers = min(max(1, ocr_workers), len(page_jobs))
     if max_workers <= 1:
         for job in page_jobs:
             _handle_page(job)
-        return
+        return [page_results.get(page_number, "") for page_number in page_numbers]
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         list(tqdm(executor.map(_handle_page, page_jobs), total=len(page_jobs)))
+    return [page_results.get(page_number, "") for page_number in page_numbers]
 
 
 def write_processed_ocr_pages(page_output_dir: str, page_numbers: Sequence[int], pages: Sequence[str]) -> None:
@@ -205,7 +200,7 @@ def write_processed_ocr_pages(page_output_dir: str, page_numbers: Sequence[int],
 
 @dataclass
 class OCRMarkdownGenerator:
-    ocr_client: DeepseekOCRClient
+    ocr_client: OCRClient
     pdf_loader: Callable[[str, int, Optional[List[int]]], List[Image.Image]] = pdf_to_images_high_quality
     ocr_workers: int = 8
 
@@ -225,23 +220,24 @@ class OCRMarkdownGenerator:
 
         if is_nearly_blank_page(image):
             if raw_output_dir:
-                write_raw_ocr_outputs(raw_output_dir, page_number, "", "")
+                write_raw_ocr_output(raw_output_dir, page_number, "")
             page_markdown_path.parent.mkdir(parents=True, exist_ok=True)
             page_markdown_path.write_text("", encoding="utf-8")
             return ""
 
         if input_image_dir:
             save_ocr_input_image(input_image_dir, page_number, image)
-        content = self.ocr_client.infer_image(image)
-        if raw_output_dir:
-            write_raw_ocr_outputs(raw_output_dir, page_number, content, "")
-
-        processed_content = process_ocr_page_content(
-            content,
-            image,
-            image_output_dir,
-            page_number,
+        result = self.ocr_client.recognize_page(
+            OCRPageRequest(
+                page_number=page_number,
+                image=image,
+                image_output_dir=image_output_dir,
+            )
         )
+        if raw_output_dir:
+            write_raw_ocr_output(raw_output_dir, page_number, result.raw_text)
+
+        processed_content = result.markdown
         if bold_texts:
             processed_content = apply_bold_texts_to_markdown(processed_content, bold_texts)
         page_markdown_path.parent.mkdir(parents=True, exist_ok=True)
@@ -274,13 +270,3 @@ def is_nearly_blank_page(
             if pixels[x, y] < white_threshold:  # type: ignore
                 non_white_pixels += 1
     return (non_white_pixels / max(1, total_pixels)) <= non_white_ratio_threshold
-
-def init_ocr_client(args: argparse.Namespace) -> DeepseekOCRClient:
-    """
-    根据命令行参数初始化 OCR 客户端。
-    """
-    client = configure_openai(args.ocr_base_url, args.ocr_api_key)
-    return DeepseekOCRClient(
-        client=client,
-        model=args.ocr_model,
-    )

@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
 import base64
 import io
 import re
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
-from openai import OpenAI
 from PIL import Image
-from llm_util import has_low_diversity_or_repetition
 
-DEFAULT_OCR_PROMPT = "<image>\n<|grounding|>Convert the document to markdown."
-DEFAULT_OCR_PROMPT2 = "<image>\n<|grounding|>Convert the document to markdown" # change prompt to avoid cache hit
-DEFAULT_LAYOUT_PROMPT = "<image>\n<|grounding|>Given the layout of the image."
+from llm_util import has_low_diversity_or_repetition
+from translate_service import configure_openai
+
 DEFAULT_OCR_IMAGE_MAX_SIDE = 640
-DEFAULT_OCR_MAX_RETRIES = 3
-OCR_FAILURE_PREFIX = "【OCR "
-COORDINATE_PATTERN = re.compile(r"\[\[(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+\s*)\]\]")
 REPEATED_NUMBERING_PATTERN = re.compile(r"(?:^|\s)(?:\d+\.\s*){40,}")
 
 
 def looks_invalid_ocr_output(text: str) -> bool:
-    """
-    Detect obviously broken OCR outputs returned by incompatible prompts or
-    partially supported multimodal endpoints.
-    """
     stripped = (text or "").strip()
     if not stripped:
         return True
@@ -37,199 +33,54 @@ def looks_invalid_ocr_output(text: str) -> bool:
     return False
 
 
-# def resize_image_for_ocr(image: Image.Image, max_side: int = DEFAULT_OCR_IMAGE_MAX_SIDE) -> Image.Image:
-#     """
-#     Resize an image to the OCR model's preferred working size while preserving aspect ratio.
-#     """
-#     if max_side <= 0:
-#         return image.copy()
-#     resized = image.convert("RGB")
-#     if max(resized.size) <= max_side:
-#         return resized
-#     resized.thumbnail((max_side, max_side))
-#     return resized
+def resize_image_for_ocr(image: Image.Image, max_side: int = DEFAULT_OCR_IMAGE_MAX_SIDE) -> Image.Image:
+    if max_side <= 0:
+        return image.copy()
+    resized = image.convert("RGB")
+    if max(resized.size) <= max_side:
+        return resized
+    resized.thumbnail((max_side, max_side))
+    return resized
 
 
 def encode_image_to_data_url(image: Image.Image) -> str:
-    """
-    将 PIL 图像编码成 data URL，以便通过 OpenAI 图像消息传输。
-    """
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{encoded}"
 
-class DeepseekOCRClient:
-    """
-    使用 OpenAI 兼容 API 执行 OCR 推理。
-    """
 
-    def __init__(
-        self,
-        client: OpenAI,
-        model: str,
-    ) -> None:
-        self.client = client
-        self.model = model
+def encode_image_data_url_for_ocr(image: Image.Image) -> str:
+    return encode_image_to_data_url(image)
 
-    def _infer_with_retry(self, prompt: str, data_url: str) -> tuple[str, bool]:
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ]
-            }
-        ]
-        for _ in range(DEFAULT_OCR_MAX_RETRIES):
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=0.0,
-                )
-                content = response.choices[0].message.content or ""
-                return content, True
-            except Exception as exc:
-                print(f"OCR inference error: {exc}")
-                continue
-        return "", False
 
-    def infer_image(
-        self,
-        image: Image.Image,
-    ) -> str:
-        data_url = encode_image_to_data_url(image)
-        content, suc = self._infer_with_retry(DEFAULT_OCR_PROMPT, data_url)
-        if not suc:  # exception during inference.
-            return content
+@dataclass
+class OCRPageRequest:
+    page_number: int
+    image: Image.Image
+    image_output_dir: str
+    pdf_options: dict[str, Any] = field(default_factory=dict)
 
-        is_valid = not looks_invalid_ocr_output(content)        
-        if not is_valid:
-            # change prompt and retry to avoid cache hit on broken output
-            print("Initial OCR output looks invalid, retrying with alternative prompt...")
-            content, suc = self._infer_with_retry(DEFAULT_OCR_PROMPT2, data_url)
-            if not suc:  # exception during inference.
-                return content
-            is_valid = not looks_invalid_ocr_output(content)
-        
-        if not is_valid:
-            # still invalid after retry, try cropping and remapping coordinates
-            print("OCR output still looks invalid, attempting to crop and re-map coordinates...")
-            crop_result = crop_main_text_region(image)
-            if crop_result is not None:
-                print(f"Original image size: {image.size}, Cropped image size: {crop_result[0].size}")
-                crop, crop_box = crop_result
-                cropped_data_url = encode_image_to_data_url(crop)
-                cropped_content, suc = self._infer_with_retry(DEFAULT_OCR_PROMPT, cropped_data_url)
-                if suc and not looks_invalid_ocr_output(cropped_content):
-                    return remap_ocr_coordinates_to_original(
-                        cropped_content,
-                        original_size=image.size,
-                        crop_box=crop_box,
-                    )
-            return ""
 
-        return content
+@dataclass
+class OCRPageResult:
+    raw_text: str
+    markdown: str
 
-def crop_main_text_region(image: Image.Image) -> tuple[Image.Image, tuple[int, int, int, int]] | None:
-    grayscale = image.convert("L")
-    width, height = grayscale.size
-    pixels = grayscale.load()
-    threshold = 245
-    min_dark_per_row = max(2, width // 200)
-    min_dark_per_col = max(2, height // 200)
 
-    top = None
-    bottom = None
-    for y in range(height):
-        dark = 0
-        for x in range(width):
-            if pixels[x, y] < threshold:  # type: ignore[index]
-                dark += 1
-        if dark >= min_dark_per_row:
-            top = y
-            break
-    for y in range(height - 1, -1, -1):
-        dark = 0
-        for x in range(width):
-            if pixels[x, y] < threshold:  # type: ignore[index]
-                dark += 1
-        if dark >= min_dark_per_row:
-            bottom = y
-            break
+class OCRClient(Protocol):
+    def recognize_page(self, request: OCRPageRequest) -> OCRPageResult:
+        ...
 
-    left = None
-    right = None
-    for x in range(width):
-        dark = 0
-        for y in range(height):
-            if pixels[x, y] < threshold:  # type: ignore[index]
-                dark += 1
-        if dark >= min_dark_per_col:
-            left = x
-            break
-    for x in range(width - 1, -1, -1):
-        dark = 0
-        for y in range(height):
-            if pixels[x, y] < threshold:  # type: ignore[index]
-                dark += 1
-        if dark >= min_dark_per_col:
-            right = x
-            break
+    def build_markdown_from_raw(self, request: OCRPageRequest, raw_text: str) -> str:
+        ...
 
-    if None in (top, bottom, left, right):
-        return None
-    if bottom < top or right < left:
-        return None
 
-    pad_x = max(24, width // 40)
-    pad_y = max(24, height // 40)
-    crop_box = (
-        max(0, left - pad_x),
-        max(0, top - pad_y),
-        min(width, right + pad_x),
-        min(height, bottom + pad_y),
+def init_ocr_client(args: argparse.Namespace) -> OCRClient:
+    from ocr_client_deepseek import DeepseekOCRClient
+
+    client = configure_openai(args.ocr_base_url, args.ocr_api_key)
+    return DeepseekOCRClient(
+        client=client,
+        model=args.ocr_model,
     )
-    cropped = image.crop(crop_box)
-    if cropped.size == image.size:
-        return None
-    return cropped, crop_box
-
-
-def remap_ocr_coordinates_to_original(
-    content: str,
-    original_size: tuple[int, int],
-    crop_box: tuple[int, int, int, int],
-) -> str:
-    if not content or "[[" not in content:
-        return content
-
-    original_width, original_height = original_size
-    crop_left, crop_top, crop_right, crop_bottom = crop_box
-    crop_width = max(1, crop_right - crop_left)
-    crop_height = max(1, crop_bottom - crop_top)
-
-    def _replace(match: re.Match[str]) -> str:
-        try:
-            x1, y1, x2, y2 = [int(part.strip()) for part in match.group(1).split(",")]
-        except ValueError:
-            return match.group(0)
-
-        mapped = (
-            _map_coord(x1, crop_left, crop_width, original_width),
-            _map_coord(y1, crop_top, crop_height, original_height),
-            _map_coord(x2, crop_left, crop_width, original_width),
-            _map_coord(y2, crop_top, crop_height, original_height),
-        )
-        return f"[[{mapped[0]}, {mapped[1]}, {mapped[2]}, {mapped[3]}]]"
-
-    return COORDINATE_PATTERN.sub(_replace, content)
-
-
-def _map_coord(coord: int, crop_start: int, crop_span: int, original_span: int) -> int:
-    clamped = min(999, max(0, coord))
-    absolute = crop_start + (clamped / 999.0) * crop_span
-    mapped = round((absolute / max(1, original_span)) * 999)
-    return min(999, max(0, mapped))

@@ -30,7 +30,7 @@
       "args": [
         "--input",
         "tests/data/book.pdf",
-        "--pages", "11",
+        "--pages", "11,39",
         "--output-dir",
         "tests/data/output/one_page_ocr_only",
         "--clear",
