@@ -14,6 +14,30 @@ def normalize_text_for_matching(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
 
 
+def _markdown_protected_ranges(markdown: str) -> List[Tuple[int, int]]:
+    ranges: List[Tuple[int, int]] = []
+    patterns = (
+        r"!\[[^\]]*\]\([^)]+\)",
+        r"\[[^\]]+\]\([^)]+\)",
+        r"`[^`\n]+`",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, markdown):
+            ranges.append((match.start(), match.end()))
+    ranges.sort()
+    return ranges
+
+
+def _range_overlaps_protected(start: int, end: int, protected_ranges: Sequence[Tuple[int, int]]) -> bool:
+    for protected_start, protected_end in protected_ranges:
+        if protected_end <= start:
+            continue
+        if protected_start >= end:
+            break
+        return True
+    return False
+
+
 def is_bold_span(span: dict) -> bool:
     font = (span.get("font") or "").lower()
     flags = span.get("flags") or 0
@@ -146,29 +170,34 @@ def apply_bold_texts_to_markdown(markdown: str, bold_texts: Sequence[str]) -> st
         return markdown
 
     ranges: List[Tuple[int, int]] = []
+    protected_ranges = _markdown_protected_ranges(markdown)
     search_start = 0
     for bold_text in bold_texts:
         needle = normalize_text_for_matching(bold_text)
         if not needle:
             continue
         found_at = normalized_markdown.find(needle, search_start)
-        if found_at < 0:
+        if found_at < 0 and search_start:
             found_at = normalized_markdown.find(needle)
-        if found_at < 0:
-            continue
 
-        norm_end = found_at + len(needle) - 1
-        original_start = index_map[found_at]
-        original_end = index_map[norm_end] + 1
+        while found_at >= 0:
+            norm_end = found_at + len(needle) - 1
+            original_start = index_map[found_at]
+            original_end = index_map[norm_end] + 1
 
-        if ranges and original_start < ranges[-1][1]:
-            continue
-        if markdown[original_start:original_end].startswith("**") and markdown[original_start:original_end].endswith("**"):
+            if ranges and original_start < ranges[-1][1]:
+                found_at = normalized_markdown.find(needle, found_at + len(needle))
+                continue
+            if _range_overlaps_protected(original_start, original_end, protected_ranges):
+                found_at = normalized_markdown.find(needle, found_at + len(needle))
+                continue
+            if markdown[original_start:original_end].startswith("**") and markdown[original_start:original_end].endswith("**"):
+                found_at = normalized_markdown.find(needle, found_at + len(needle))
+                continue
+
+            ranges.append((original_start, original_end))
             search_start = found_at + len(needle)
-            continue
-
-        ranges.append((original_start, original_end))
-        search_start = found_at + len(needle)
+            break
 
     if not ranges:
         return markdown

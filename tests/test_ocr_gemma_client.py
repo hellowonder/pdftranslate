@@ -17,12 +17,11 @@ from ocr_gemma_client import GemmaOCRClient  # noqa: E402
 
 class GemmaOCRClientTest(unittest.TestCase):
     def test_recognize_page_returns_markdown_and_crops_grounded_images(self) -> None:
-        grounded_output = """<|ref|>text<|/ref|><|det|>[[100, 100, 900, 180]]<|/det|>
-Top paragraph.
+        grounded_output = """Top paragraph.
 
-<|ref|>image<|/ref|><|det|>[[200, 300, 800, 600]]<|/det|>
-<|ref|>image_caption<|/ref|><|det|>[[220, 620, 780, 680]]<|/det|>
-<center>Figure 1. Caption text.</center>
+![](image_200_300_800_600.png)
+
+Figure 1. Caption text.
 """
         mock_response = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=grounded_output))]

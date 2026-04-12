@@ -16,6 +16,11 @@ class PdfBoldStylesTest(unittest.TestCase):
         result = apply_bold_texts_to_markdown(markdown, ["About figures."])
         self.assertEqual(result, "Alpha. **About figures.** Beta. About figures. Gamma.")
 
+    def test_apply_bold_texts_skips_markdown_image_destinations(self) -> None:
+        markdown = "![](images/39_0.jpg)\n\nj starts paragraph."
+        result = apply_bold_texts_to_markdown(markdown, ["j"])
+        self.assertEqual(result, "![](images/39_0.jpg)\n\n**j** starts paragraph.")
+
     def test_extract_bold_text_by_page_reads_fixture_pdf(self) -> None:
         pdf_path = PROJECT_ROOT / "tests" / "data" / "test_page_14.pdf"
         if not pdf_path.exists():
