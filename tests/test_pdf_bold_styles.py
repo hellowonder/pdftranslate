@@ -59,6 +59,29 @@ class PdfBoldStylesTest(unittest.TestCase):
             [BoldAnchor(text="Important Term", left_context="An", right_context="appears.")],
         )
 
+    def test_extract_bold_texts_from_page_dict_keeps_bold_space_inside_same_anchor(self) -> None:
+        page_dict = {
+            "blocks": [
+                {
+                    "lines": [
+                        {
+                            "spans": [
+                                {"text": "Part", "font": "Some-Bold", "size": 12, "bbox": (0, 0, 28, 12)},
+                                {"text": " ", "font": "Some-Bold", "size": 12, "bbox": (28, 0, 32, 12)},
+                                {"text": "II", "font": "Some-Bold", "size": 12, "bbox": (32, 0, 45, 12)},
+                                {"text": " title", "font": "Some-Regular", "size": 12, "bbox": (45, 0, 80, 12)},
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+
+        self.assertEqual(
+            extract_bold_texts_from_page_dict(page_dict),
+            [BoldAnchor(text="Part II", left_context="", right_context="title")],
+        )
+
     def test_extract_bold_texts_from_page_dict_keeps_separated_bold_spans_apart(self) -> None:
         page_dict = {
             "blocks": [

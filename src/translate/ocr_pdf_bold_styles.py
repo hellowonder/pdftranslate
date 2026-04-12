@@ -178,13 +178,20 @@ def extract_bold_texts_from_line(line: dict) -> List[BoldAnchor]:
 
     for span, span_start, span_end in positions:
         span_text = span.get("text", "")
-        is_bold_text = is_bold_span(span) and bool(span_text.strip())
+        span_is_bold = is_bold_span(span)
+        has_visible_text = bool(span_text.strip())
 
-        if not is_bold_text:
+        if not span_is_bold:
             _append_anchor_if_valid(anchors, line_text, current_bold_start, current_bold_end)
             current_bold_start = None
             current_bold_end = None
             previous_bold_span = None
+            continue
+
+        if not has_visible_text:
+            if current_bold_start is not None:
+                current_bold_end = span_end
+                previous_bold_span = span
             continue
 
         starts_new_anchor = (
