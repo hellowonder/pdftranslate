@@ -72,16 +72,22 @@ def save_referenced_images(image: Image.Image, refs, output_dir: str, page_idx: 
                 x1, y1, x2, y2 = points
             except ValueError:
                 continue
-            x1 = int(x1 / 999 * image_width)
-            y1 = int(y1 / 999 * image_height)
-            x2 = int(x2 / 999 * image_width)
-            y2 = int(y2 / 999 * image_height)
+            coord_scale = detect_coordinate_scale([x1, y1, x2, y2])
+            x1 = int(x1 / coord_scale * image_width)
+            y1 = int(y1 / coord_scale * image_height)
+            x2 = int(x2 / coord_scale * image_width)
+            y2 = int(y2 / coord_scale * image_height)
             try:
                 cropped = image.crop((x1, y1, x2, y2)).convert("RGB")
                 cropped.save(os.path.join(output_dir, f"{page_idx}_{img_idx}.jpg"))
                 img_idx += 1
             except Exception:
                 continue
+
+
+def detect_coordinate_scale(coords: List[int]) -> int:
+    max_coord = max(coords) if coords else 999
+    return 1000 if max_coord >= 1000 else 999
 
 
 def parse_layout_regions(layout_content: str) -> List[dict]:
@@ -117,10 +123,11 @@ def crop_layout_images(
         if region["label"] != "image":
             continue
         x1, y1, x2, y2 = region["coords"]
-        px1 = int(x1 / 999 * image_width)
-        py1 = int(y1 / 999 * image_height)
-        px2 = int(x2 / 999 * image_width)
-        py2 = int(y2 / 999 * image_height)
+        coord_scale = detect_coordinate_scale(region["coords"])
+        px1 = int(x1 / coord_scale * image_width)
+        py1 = int(y1 / coord_scale * image_height)
+        px2 = int(x2 / coord_scale * image_width)
+        py2 = int(y2 / coord_scale * image_height)
         if px2 <= px1 or py2 <= py1:
             continue
         filename = f"{page_idx}_{image_idx}.jpg"

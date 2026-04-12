@@ -77,10 +77,10 @@ class OCRClient(Protocol):
 
 
 def init_ocr_client(args: argparse.Namespace) -> OCRClient:
-    from ocr_client_deepseek import DeepseekOCRClient
-
     client = configure_openai(args.ocr_base_url, args.ocr_api_key)
-    return DeepseekOCRClient(
+    from ocr_gemma_client import GemmaOCRClient
+
+    return GemmaOCRClient(
         client=client,
         model=args.ocr_model,
     )

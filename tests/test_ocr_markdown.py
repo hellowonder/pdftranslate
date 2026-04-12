@@ -121,18 +121,18 @@ class OCRMarkdownClientInitTest(unittest.TestCase):
         args = argparse.Namespace(
             ocr_base_url="http://localhost:11434/v1",
             ocr_api_key="secret",
-            ocr_model="deepseek-ocr:3b",
+            ocr_model="gemma4:26b",
         )
 
         with patch("ocr_client.configure_openai", return_value="client") as mocked_configure, patch(
-            "ocr_client_deepseek.DeepseekOCRClient"
+            "ocr_gemma_client.GemmaOCRClient"
         ) as mocked_client:
             init_ocr_client(args)
 
         mocked_configure.assert_called_once_with("http://localhost:11434/v1", "secret")
         mocked_client.assert_called_once_with(
             client="client",
-            model="deepseek-ocr:3b",
+            model="gemma4:26b",
         )
 
 
