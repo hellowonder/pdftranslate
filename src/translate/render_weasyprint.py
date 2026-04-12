@@ -249,6 +249,44 @@ def resolve_font_path(font_path: Optional[str]) -> Optional[str]:
     return None
 
 
+def resolve_bold_font_path(font_path: Optional[str]) -> Optional[str]:
+    """
+    尝试为正文主字体寻找对应的粗体文件。
+    """
+    if not font_path:
+        return None
+    path = Path(font_path)
+    if not path.exists():
+        return None
+
+    replacement_candidates = [
+        ("Regular", "Bold"),
+        ("regular", "bold"),
+        ("-Reg", "-Bold"),
+        ("-Roman", "-Bold"),
+        ("-Light", "-Bold"),
+        ("-Book", "-Bold"),
+        ("_Regular", "_Bold"),
+    ]
+    for source, target in replacement_candidates:
+        if source not in path.name:
+            continue
+        candidate = path.with_name(path.name.replace(source, target, 1))
+        if candidate.exists():
+            return str(candidate)
+
+    fixed_candidates = {
+        "msyh.ttc": path.with_name("msyhbd.ttc"),
+        "MSYH.TTC": path.with_name("MSYHBD.TTC"),
+        "simsun.ttc": path.with_name("simhei.ttf"),
+        "SIMSUN.TTC": path.with_name("SIMHEI.TTF"),
+    }
+    fixed = fixed_candidates.get(path.name)
+    if fixed is not None and fixed.exists():
+        return str(fixed)
+    return None
+
+
 def normalize_markdown_image_links(text: str, image_root: Optional[str]) -> str:
     """
     规范化 Markdown 图片链接，但尽量保留相对路径，交由 ``base_url`` / ``image_root`` 解析。
@@ -590,7 +628,16 @@ def _build_style_css(
     font_face_css = ""
     if font_path:
         font_uri = Path(font_path).resolve().as_uri()
-        font_face_css = f"@font-face {{ font-family: 'DocCustomCJK'; src: url('{font_uri}'); }}\n"
+        font_face_rules = [
+            f"@font-face {{ font-family: 'DocCustomCJK'; src: url('{font_uri}'); font-weight: 400; font-style: normal; }}",
+        ]
+        bold_font_path = resolve_bold_font_path(font_path)
+        if bold_font_path:
+            bold_uri = Path(bold_font_path).resolve().as_uri()
+            font_face_rules.append(
+                f"@font-face {{ font-family: 'DocCustomCJK'; src: url('{bold_uri}'); font-weight: 700; font-style: normal; }}"
+            )
+        font_face_css = "\n".join(font_face_rules) + "\n"
         font_stack = "'DocCustomCJK', " + font_stack
 
     image_spacing_px = max(0, image_spacing)
@@ -610,6 +657,9 @@ def _build_style_css(
         font-size: {font_size_css};
         line-height: 1.5;
         color: #111;
+    }}
+    strong, b {{
+        font-weight: 700;
     }}
     img {{
         max-width: 100%;

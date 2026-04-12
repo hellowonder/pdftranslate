@@ -4,6 +4,7 @@
 
 - `src/translate/pdf_translate.py`：PDF OCR + 翻译，输出 Markdown / PDF
 - `src/translate/epub_translate.py`：EPUB 翻译
+- `src/translate/pdf_crop_tool.py`：交互式 PDF 裁边工具
 
 默认模型配置：
 
@@ -67,6 +68,24 @@ VLLM_SERVER_DEV_MODE=1 ./.vllm-env/bin/vllm serve \
 - `--ocr-base-url`
 - `--ocr-api-key`
 - `--ocr-model`
+
+## PDF Crop Tool
+
+用于手动确定 PDF 裁边参数并导出裁边后的 PDF。
+
+最小命令：
+
+```bash
+./.venv/bin/python src/translate/pdf_crop_tool.py \
+  --input tests/data/one_page.pdf
+```
+
+使用方式：
+
+- 在页面预览上拖拽，框出“保留区域”。
+- 所有页面共享同一套裁边设置；翻页时会显示当前共享框在该页上的映射结果。
+- 可以直接拖动绿色边框的四条边做微调。
+- `Export PDF` 导出裁边后的结果，默认文件名为 `*.cropped.pdf`。
 
 ## EPUB
 

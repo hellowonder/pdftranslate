@@ -17,6 +17,7 @@ The matching is intentionally conservative:
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -38,7 +39,17 @@ class BoldAnchor:
 
 def normalize_text_for_matching(text: str) -> str:
     """Collapse whitespace so PDF-extracted text and OCR markdown align more reliably."""
-    return re.sub(r"\s+", " ", (text or "").strip())
+    normalized = unicodedata.normalize("NFKC", text or "")
+    normalized = (
+        normalized.replace("’", "'")
+        .replace("‘", "'")
+        .replace("“", '"')
+        .replace("”", '"')
+        .replace("–", "-")
+        .replace("—", "-")
+        .replace("−", "-")
+    )
+    return re.sub(r"\s+", " ", normalized.strip())
 
 
 def _markdown_protected_ranges(markdown: str) -> List[Tuple[int, int]]:
@@ -65,6 +76,28 @@ def _range_overlaps_protected(start: int, end: int, protected_ranges: Sequence[T
             break
         return True
     return False
+
+
+def _range_inside_heading_content(markdown: str, start: int, end: int) -> bool:
+    """Skip wrapping text that is already part of a Markdown heading line."""
+    line_start = markdown.rfind("\n", 0, start) + 1
+    line_end = markdown.find("\n", end)
+    if line_end < 0:
+        line_end = len(markdown)
+    line = markdown[line_start:line_end]
+    if not re.match(r"^\s*#{1,6}\s+", line):
+        return False
+
+    content_start_in_line = 0
+    while content_start_in_line < len(line) and line[content_start_in_line].isspace():
+        content_start_in_line += 1
+    while content_start_in_line < len(line) and line[content_start_in_line] == "#":
+        content_start_in_line += 1
+    while content_start_in_line < len(line) and line[content_start_in_line].isspace():
+        content_start_in_line += 1
+
+    content_start = line_start + content_start_in_line
+    return start >= content_start and end <= line_end
 
 
 def is_bold_span(span: dict) -> bool:
@@ -276,6 +309,7 @@ def build_normalized_index_map(text: str) -> Tuple[str, List[int]]:
 
 
 def _best_context_span(
+    markdown: str,
     normalized_markdown: str,
     index_map: Sequence[int],
     anchor: BoldAnchor,
@@ -292,6 +326,8 @@ def _best_context_span(
 
     best_candidate: Optional[Tuple[int, int]] = None
     best_score = -1
+    candidate_count = 0
+    unique_candidate: Optional[Tuple[int, int]] = None
     found_at = normalized_markdown.find(needle)
     while found_at >= 0:
         norm_end = found_at + len(needle)
@@ -301,6 +337,9 @@ def _best_context_span(
         if _range_overlaps_protected(original_start, original_end, protected_ranges):
             found_at = normalized_markdown.find(needle, found_at + 1)
             continue
+        if _range_inside_heading_content(markdown, original_start, original_end):
+            found_at = normalized_markdown.find(needle, found_at + 1)
+            continue
         if any(original_start < end and original_end > start for start, end in occupied_ranges):
             found_at = normalized_markdown.find(needle, found_at + 1)
             continue
@@ -308,6 +347,8 @@ def _best_context_span(
             found_at = normalized_markdown.find(needle, found_at + 1)
             continue
 
+        candidate_count += 1
+        unique_candidate = (original_start, original_end)
         context_window = max(len(left_context) + CONTEXT_WINDOW_CHARS, len(right_context) + CONTEXT_WINDOW_CHARS, CONTEXT_WINDOW_CHARS)
         left_window = normalize_text_for_matching(normalized_markdown[max(0, found_at - context_window) : found_at])
         right_window = normalize_text_for_matching(normalized_markdown[norm_end : norm_end + context_window])
@@ -316,10 +357,13 @@ def _best_context_span(
         if not left_context and not right_context:
             found_at = normalized_markdown.find(needle, found_at + 1)
             continue
-        if left_context and not left_score:
+        if left_context and right_context and not left_score and not right_score:
             found_at = normalized_markdown.find(needle, found_at + 1)
             continue
-        if right_context and not right_score:
+        if left_context and not right_context and not left_score:
+            found_at = normalized_markdown.find(needle, found_at + 1)
+            continue
+        if right_context and not left_context and not right_score:
             found_at = normalized_markdown.find(needle, found_at + 1)
             continue
 
@@ -330,7 +374,11 @@ def _best_context_span(
 
         found_at = normalized_markdown.find(needle, found_at + 1)
 
-    return best_candidate
+    if best_candidate is not None:
+        return best_candidate
+    if candidate_count == 1:
+        return unique_candidate
+    return None
 
 
 def apply_bold_texts_to_markdown(markdown: str, bold_texts: Sequence[BoldAnchor]) -> str:
@@ -343,6 +391,7 @@ def apply_bold_texts_to_markdown(markdown: str, bold_texts: Sequence[BoldAnchor]
     protected_ranges = _markdown_protected_ranges(markdown)
     for anchor in bold_texts:
         candidate = _best_context_span(
+            markdown=markdown,
             normalized_markdown=normalized_markdown,
             index_map=index_map,
             anchor=anchor,
@@ -356,7 +405,7 @@ def apply_bold_texts_to_markdown(markdown: str, bold_texts: Sequence[BoldAnchor]
         return markdown
 
     enriched = markdown
-    for start, end in reversed(ranges):
+    for start, end in sorted(ranges, key=lambda item: item[0], reverse=True):
         enriched = enriched[:start] + "**" + enriched[start:end] + "**" + enriched[end:]
     return enriched
 

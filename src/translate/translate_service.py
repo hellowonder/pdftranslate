@@ -28,7 +28,7 @@ LatexFormulaHandlingMode = Literal["placeholder", "direct"]
 ReasoningEffort = Literal["none", "low", "medium", "high"]
 
 DEFAULT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT = (
-r"""You are a professional translator for mathematical Markdown documents.
+r"""You are a professional English to Chinese translator for mathematical Markdown documents.
 
 Translate the input into Simplified Chinese while strictly preserving structure and formulas.
 
@@ -51,7 +51,7 @@ Output only the translated Markdown.
 )
 
 DIRECT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT = (
-r"""You are a professional translator for mathematical Markdown documents.
+r"""You are a professional English to Chinese translator for mathematical Markdown documents.
 
 Translate the input into Simplified Chinese while strictly preserving structure and formulas.
 
@@ -71,7 +71,7 @@ Output only the translated Markdown.
 )
 
 DEFAULT_HTML_TRANSLATION_SYSTEM_PROMPT = (
-r"""You are a professional translator for mathematical HTML documents.
+r"""You are a professional English to Chinese translator for mathematical HTML documents.
 
 Translate the input into Simplified Chinese while strictly preserving structure and formulas.
 
@@ -93,7 +93,7 @@ Output only the translated HTML.
 )
 
 DIRECT_HTML_TRANSLATION_SYSTEM_PROMPT = (
-r"""You are a professional translator for mathematical HTML documents.
+r"""You are a professional English to Chinese translator for mathematical HTML documents.
 
 Translate the input into Simplified Chinese while strictly preserving structure and formulas.
 
@@ -112,7 +112,7 @@ Output only the translated HTML.
 )
 
 DEFAULT_PLAIN_TEXT_TRANSLATION_SYSTEM_PROMPT = (
-r"""You are a professional translator for short plain-text content.
+r"""You are a professional English to Chinese translator for short plain-text content.
 
 Translate the input into natural, fluent Simplified Chinese.
 

@@ -27,6 +27,45 @@ class PdfBoldStylesTest(unittest.TestCase):
         )
         self.assertEqual(result, "![](images/39_0.jpg)\n\nj starts paragraph.")
 
+    def test_apply_bold_texts_normalizes_ligatures_and_uses_unique_fallback(self) -> None:
+        markdown = "Definition 3.1 A manifold is smooth."
+        result = apply_bold_texts_to_markdown(
+            markdown,
+            [BoldAnchor(text="Deﬁnition 3.1", left_context="", right_context="A map i : X → M")],
+        )
+        self.assertEqual(result, "**Definition 3.1** A manifold is smooth.")
+
+    def test_apply_bold_texts_accepts_single_sided_context_when_best_match_is_clear(self) -> None:
+        markdown = "A closed embedding is proper. Another closed embedding appears later."
+        result = apply_bold_texts_to_markdown(
+            markdown,
+            [BoldAnchor(text="closed embedding", left_context="A", right_context="is a proper4 injective")],
+        )
+        self.assertEqual(result, "A **closed embedding** is proper. Another closed embedding appears later.")
+
+    def test_apply_bold_texts_inserts_ranges_by_position_not_anchor_order(self) -> None:
+        markdown = "Alpha Beta Gamma Delta"
+        result = apply_bold_texts_to_markdown(
+            markdown,
+            [
+                BoldAnchor(text="Gamma", left_context="Beta", right_context="Delta"),
+                BoldAnchor(text="Alpha", left_context="", right_context="Beta"),
+                BoldAnchor(text="Delta", left_context="Gamma", right_context=""),
+            ],
+        )
+        self.assertEqual(result, "**Alpha** Beta **Gamma** **Delta**")
+
+    def test_apply_bold_texts_skips_markdown_heading_lines(self) -> None:
+        markdown = "## 3 Lagrangian Submanifolds\n\n### 3.1 Submanifolds"
+        result = apply_bold_texts_to_markdown(
+            markdown,
+            [
+                BoldAnchor(text="Lagrangian Submanifolds", left_context="", right_context=""),
+                BoldAnchor(text="Submanifolds", left_context="3.1", right_context=""),
+            ],
+        )
+        self.assertEqual(result, markdown)
+
     def test_extract_bold_text_by_page_reads_fixture_pdf(self) -> None:
         pdf_path = PROJECT_ROOT / "tests" / "data" / "test_page_14.pdf"
         if not pdf_path.exists():

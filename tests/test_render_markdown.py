@@ -104,6 +104,13 @@ class RenderMarkdownMathOptimizationTest(unittest.TestCase):
 
         self.assertEqual(resolved, local_simsun)
 
+    def test_resolve_bold_font_path_maps_noto_regular_to_bold(self) -> None:
+        regular = "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"
+        expected = "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc"
+        if not Path(regular).exists() or not Path(expected).exists():
+            self.skipTest("missing noto cjk fonts")
+        self.assertEqual(render_weasyprint.resolve_bold_font_path(regular), expected)
+
     def test_render_translation_pdf_batch_page_bytes_splits_large_batches(self) -> None:
         render_calls = []
         write_pdf_calls = []
