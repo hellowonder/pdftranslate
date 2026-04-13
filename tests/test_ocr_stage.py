@@ -46,7 +46,7 @@ class OCRStageVllmLifecycleTest(unittest.TestCase):
         ), patch("ocr_stage.notify_vllm_control_endpoint") as mocked_notify, patch(
             "ocr_stage.init_ocr_client", return_value="ocr_client"
         ), patch("ocr_stage.run_ocr_pages", return_value=["page markdown"]), patch(
-            "ocr_stage.apply_pdf_bold_marks", return_value=["page markdown"]
+            "ocr_stage.apply_pdf_style_marks", return_value=["page markdown"]
         ), patch(
             "ocr_stage.page_merge_outputs_exist", return_value=True
         ):
@@ -82,7 +82,7 @@ class OCRStageVllmLifecycleTest(unittest.TestCase):
         ), patch("ocr_stage.notify_vllm_control_endpoint") as mocked_notify, patch(
             "ocr_stage.init_ocr_client", return_value="ocr_client"
         ), patch("ocr_stage.run_ocr_pages", return_value=["page markdown"]), patch(
-            "ocr_stage.apply_pdf_bold_marks", return_value=["page markdown"]
+            "ocr_stage.apply_pdf_style_marks", return_value=["page markdown"]
         ), patch(
             "ocr_stage.page_merge_outputs_exist", return_value=True
         ):
@@ -136,13 +136,13 @@ class OCRStageVllmLifecycleTest(unittest.TestCase):
         ), patch("ocr_stage.init_ocr_client", return_value="ocr_client"), patch(
             "ocr_stage.run_ocr_pages", return_value=["page markdown"]
         ), patch(
-            "ocr_stage.apply_pdf_bold_marks"
-        ) as mocked_apply_pdf_bold_marks, patch(
+            "ocr_stage.apply_pdf_style_marks"
+        ) as mocked_apply_pdf_style_marks, patch(
             "ocr_stage.page_merge_outputs_exist", return_value=True
         ):
             run_ocr_stage(args, output_paths, [1])
 
-        mocked_apply_pdf_bold_marks.assert_not_called()
+        mocked_apply_pdf_style_marks.assert_not_called()
 
 
 if __name__ == "__main__":

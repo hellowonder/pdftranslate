@@ -17,7 +17,7 @@ from ocr_markdown import (
     write_processed_ocr_pages,
 )
 from ocr_client import ocr_model_preserves_bold_markdown
-from ocr_pdf_bold_styles import apply_pdf_bold_marks
+from ocr_pdf_styles import apply_pdf_style_marks
 from ocr_pdf_images import pdf_to_images_high_quality
 from paged_markdown_io import page_markdown_outputs_exist, read_page_markdown_files, write_paged_markdown_document
 from translate_page_merge import BoundaryDecision, merge_cross_page_paragraphs
@@ -149,7 +149,7 @@ def run_ocr_stage(args: argparse.Namespace, output_paths: dict[str, str], page_n
                 ocr_workers=args.ocr_workers,
             )
         if not ocr_model_preserves_bold_markdown(getattr(args, "ocr_model", None)):
-            processed_pages = apply_pdf_bold_marks(output_paths["input_pdf"], page_numbers, processed_pages)
+            processed_pages = apply_pdf_style_marks(output_paths["input_pdf"], page_numbers, processed_pages)
 
         # Resolve paragraph continuation across page breaks and persist the final page-level OCR markdown.
         # Output: ocr/page_XXXX.md and ocr/<base>_page_merge.json
