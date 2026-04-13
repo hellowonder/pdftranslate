@@ -165,8 +165,10 @@ def parse_args():
     parser.add_argument("--min-page-height", type=int, default=1754, help="Fallback translation page height (px) if original missing.")
     parser.add_argument(
         "--margin",
-        default="0.3in",
-        help="Page margin for translation pages. Accepts CSS/LaTeX lengths like 0.5in, 12mm, 24px; plain numbers are treated as px.",
+        help=(
+            "Page margin for translation pages. Accepts CSS/LaTeX lengths like 0.5in, 12mm, 24px; "
+            "plain numbers are treated as px. If omitted, margin is derived from page size."
+        ),
     )
     parser.add_argument("--image-spacing", type=int, default=16, help="Spacing after inlined images, in pixels.")
     parser.add_argument("--layout-workers", type=int, default=8, help="Parallel workers for PDF layout rendering.")

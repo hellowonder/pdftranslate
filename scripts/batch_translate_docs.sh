@@ -81,7 +81,7 @@ default_args=(
   --generate-interleave-pdf
   --translation-base-url http://localhost:11434/v1
   --translation-model gemma4:26b
-  --ocr-base-url http://localhost:11434/v1
+  --ocr-base-url http://localhost:8000/v1
   --ocr-model deepseek-ocr:3b
   --translation-latex-formula-handling direct
   --enable-annotation

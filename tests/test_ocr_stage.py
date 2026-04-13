@@ -114,6 +114,36 @@ class OCRStageVllmLifecycleTest(unittest.TestCase):
 
         mocked_pdf_loader.assert_not_called()
 
+    def test_run_ocr_stage_skips_pdf_bold_reapply_for_chandra(self) -> None:
+        args = argparse.Namespace(
+            vllm_sleep=False,
+            ocr_base_url="http://localhost:8000/v1",
+            ocr_model="chandra-ocr",
+            ocr_dpi=96,
+            ocr_workers=1,
+        )
+        output_paths = {
+            "input_pdf": "input.pdf",
+            "ocr_raw_dir": "ocr_raw",
+            "ocr_input_images_dir": "ocr_input_images",
+            "ocr_images_dir": "ocr_images",
+            "ocr_dir": "ocr",
+            "ocr_page_merge": "merge.json",
+        }
+
+        with patch("ocr_stage.all_raw_ocr_outputs_exist", return_value=False), patch(
+            "ocr_stage.pdf_to_images_high_quality", return_value=["image"]
+        ), patch("ocr_stage.init_ocr_client", return_value="ocr_client"), patch(
+            "ocr_stage.run_ocr_pages", return_value=["page markdown"]
+        ), patch(
+            "ocr_stage.apply_pdf_bold_marks"
+        ) as mocked_apply_pdf_bold_marks, patch(
+            "ocr_stage.page_merge_outputs_exist", return_value=True
+        ):
+            run_ocr_stage(args, output_paths, [1])
+
+        mocked_apply_pdf_bold_marks.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

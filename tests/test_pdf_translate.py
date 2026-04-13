@@ -41,7 +41,7 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
             mocked_normalize.assert_called_once_with(str(Path(input_path).resolve()), output_paths["render_dir"])
             self.assertEqual(output_paths["input_pdf"], "/tmp/render/book.source.pdf")
 
-    def test_parse_args_defaults_margin_to_half_inch(self) -> None:
+    def test_parse_args_leaves_margin_unset_by_default(self) -> None:
         argv = [
             "pdf_translate.py",
             "--input",
@@ -53,10 +53,10 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
         with patch.object(sys, "argv", argv):
             args = parse_args()
 
-        self.assertEqual(args.margin, "0.3in")
+        self.assertIsNone(args.margin)
         self.assertEqual(args.font_size, "9.5pt")
-        self.assertFalse(args.vllm_sleep)
-        self.assertEqual(args.translation_provider, "openai_compatible")
+        self.assertTrue(args.vllm_sleep)
+        self.assertEqual(args.translation_base_url, "http://localhost:11434/v1")
         self.assertEqual(args.translation_reasoning_effort, "none")
 
     def test_parse_args_accepts_vllm_sleep(self) -> None:
@@ -74,21 +74,21 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
 
         self.assertTrue(args.vllm_sleep)
 
-    def test_parse_args_accepts_openai_compatible_translation_provider(self) -> None:
+    def test_parse_args_accepts_translation_base_url(self) -> None:
         argv = [
             "pdf_translate.py",
             "--input",
             "tests/data/one_page.pdf",
             "--output-dir",
             "tests/data/output",
-            "--translation-provider",
-            "openai_compatible",
+            "--translation-base-url",
+            "http://localhost:9999/v1",
         ]
 
         with patch.object(sys, "argv", argv):
             args = parse_args()
 
-        self.assertEqual(args.translation_provider, "openai_compatible")
+        self.assertEqual(args.translation_base_url, "http://localhost:9999/v1")
 
     def test_resolve_target_page_numbers_uses_generic_document_page_count(self) -> None:
         args = SimpleNamespace(pages="1-2")
@@ -108,6 +108,7 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
         args = SimpleNamespace(
             input="in.pdf",
             output_dir="out",
+            clear=False,
             selected_stages=["ocr", "translate", "render"],
         )
         output_paths = {"input_pdf": "normalized.pdf", "ocr_dir": "ocr", "translate_dir": "translate"}

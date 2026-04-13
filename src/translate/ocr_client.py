@@ -10,8 +10,7 @@ from typing import Any, Protocol
 
 from PIL import Image
 
-from llm_util import has_low_diversity_or_repetition
-from translate_service import configure_openai
+from llm_util import has_low_diversity_or_repetition, configure_openai
 
 DEFAULT_OCR_IMAGE_MAX_SIDE = 640
 REPEATED_NUMBERING_PATTERN = re.compile(r"(?:^|\s)(?:\d+\.\s*){40,}")
@@ -74,6 +73,11 @@ class OCRClient(Protocol):
 
     def build_markdown_from_raw(self, request: OCRPageRequest, raw_text: str) -> str:
         ...
+
+
+def ocr_model_preserves_bold_markdown(model_name: str | None) -> bool:
+    normalized = (model_name or "").lower()
+    return "chandra" in normalized
 
 
 def init_ocr_client(args: argparse.Namespace) -> OCRClient:

@@ -26,7 +26,7 @@ from markdown_katex import wrapper as katex_wrapper
 from pypdf import PdfReader, PdfWriter
 from weasyprint import HTML
 
-from render_units import font_size_to_css_value, margin_to_css_value
+from render_units import font_size_to_css_value, margin_to_css_value, resolve_page_margin_value
 
 
 DEFAULT_FONT_CANDIDATES = [
@@ -77,7 +77,7 @@ class RenderSettings:
     font_size: Union[str, int, float]
     page_width: int
     page_height: int
-    margin: str
+    margin: Optional[Union[str, int, float]]
     image_root: Optional[str]
     image_spacing: int
     katex_css: str = ""
@@ -781,7 +781,7 @@ def _resolve_render_settings(settings: RenderSettings) -> Tuple[RenderSettings, 
         font_size=settings.font_size,
         page_width=settings.page_width,
         page_height=settings.page_height,
-        margin=settings.margin,
+        margin=resolve_page_margin_value(settings.margin, settings.page_width, settings.page_height),
         image_root=settings.image_root,
         image_spacing=settings.image_spacing,
         katex_css=settings.katex_css,
@@ -1017,7 +1017,7 @@ def render_markdown_to_pdf_bytes(
     height: int,
     font_path: Optional[str],
     font_size: Union[str, int, float],
-    margin: str,
+    margin: Optional[Union[str, int, float]],
     image_root: Optional[str],
     image_spacing: int,
     katex_css: str,
@@ -1043,7 +1043,7 @@ def render_markdowns_pdf_continuous_bytes(
     height: int,
     font_path: Optional[str],
     font_size: Union[str, int, float],
-    margin: str,
+    margin: Optional[Union[str, int, float]],
     image_root: Optional[str],
     image_spacing: int,
     katex_css: str,
@@ -1070,7 +1070,7 @@ def render_translation_pdf_batch_page_bytes(
     height: int,
     font_path: Optional[str],
     font_size: Union[str, int, float],
-    margin: str,
+    margin: Optional[Union[str, int, float]],
     image_root: Optional[str],
     image_spacing: int,
     katex_css: str,

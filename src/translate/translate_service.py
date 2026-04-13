@@ -16,7 +16,6 @@ from typing import Any, Iterator, List, Literal, Optional, Sequence, Tuple
 from tqdm import tqdm
 from llm_util import (
     configure_openai,
-    configure_translation_client,
     create_chat_completion_with_retry,
     has_low_diversity_or_repetition,
 )
@@ -143,6 +142,7 @@ class TranslationService:
     latex_formula_handling: LatexFormulaHandlingMode = "placeholder"
     reasoning_effort: ReasoningEffort = "none"
     _annotation_service: Optional[AnnotationService] = None
+    _do_latex_repair: bool = False
 
     _SHORT_TRANSLATION_USER_CONTENT_MAX_CHARS = 20
 
@@ -358,7 +358,10 @@ class TranslationService:
         return restored, True
 
     def _repair_translation_latex(self, source: str, translation: str) -> Tuple[str, bool]:
-        return repair_translation_latex(source, translation, debug_stream=sys.stderr)
+        if self._do_latex_repair:
+            return repair_translation_latex(source, translation, debug_stream=sys.stderr)
+        else:
+            return translation, True
 
     def _split_outer_whitespace(self, text: str) -> Tuple[str, str, str]:
         """
@@ -962,7 +965,7 @@ def init_translation_service(
         annotation_base_url, annotation_api_key, annotation_model, annotation_reasoning_effort = (
             _resolve_annotation_args(args)
         )
-        annotation_client = configure_translation_client(
+        annotation_client = configure_openai(
             base_url=annotation_base_url,
             api_key=annotation_api_key,
         )
@@ -972,7 +975,7 @@ def init_translation_service(
             reasoning_effort=annotation_reasoning_effort,
             enabled=True,
         )
-    client = configure_translation_client(
+    client = configure_openai(
         base_url=args.translation_base_url,
         api_key=args.translation_api_key,
     )

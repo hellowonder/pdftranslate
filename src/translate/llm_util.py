@@ -19,8 +19,13 @@ THINK_TAG_PATTERN = re.compile(r"<think\b[^>]*>.*?</think>", re.IGNORECASE | re.
 THINK_OPEN_TAG_PATTERN = re.compile(r"<think\b[^>]*>", re.IGNORECASE)
 THINK_CLOSE_TAG_PATTERN = re.compile(r"</think\s*>", re.IGNORECASE)
 
+def has_low_diversity_or_repetition(text: str) -> bool:
+    tokens = (text or "").split()
+    if len(tokens) >= 20:
+        unique_ratio = len(set(tokens)) / len(tokens)
+        if unique_ratio < 0.1:
+            return True
 
-def long_repeating_token_sequence(tokens: list[str]) -> bool:
     if len(tokens) < 6:
         return False
 
@@ -30,28 +35,11 @@ def long_repeating_token_sequence(tokens: list[str]) -> bool:
     return any(count > 10 for count in counter.values())
 
 
-def has_low_diversity_or_repetition(text: str) -> bool:
-    tokens = (text or "").split()
-    if len(tokens) >= 20:
-        unique_ratio = len(set(tokens)) / len(tokens)
-        if unique_ratio < 0.1:
-            return True
-
-    return long_repeating_token_sequence(tokens)
-
-
 def configure_openai(base_url: str, api_key: str) -> OpenAI:
     """
     Instantiate an OpenAI client pointed at an OpenAI-compatible endpoint.
     """
     return OpenAI(base_url=base_url, api_key=api_key)
-
-
-def configure_translation_client(
-    base_url: str,
-    api_key: str,
-) -> Any:
-    return configure_openai(base_url, api_key)
 
 
 def strip_code_fences(text: str) -> str:

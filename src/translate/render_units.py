@@ -5,7 +5,8 @@
 from __future__ import annotations
 
 import re
-from typing import Union
+from math import sqrt
+from typing import Optional, Union
 
 
 _LENGTH_RE = re.compile(r"^\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*([A-Za-z]+)?\s*$")
@@ -17,6 +18,13 @@ _UNIT_TO_BP = {
     "mm": 72.0 / 25.4,
     "px": 72.0 / 96.0,
 }
+
+_PX_TO_PT = 72.0 / 96.0
+_SMALL_PAGE_REFERENCE_PT = (431.0, 649.0)
+_LARGE_PAGE_REFERENCE_PT = (612.0, 792.0)
+_SMALL_PAGE_MARGIN_IN = 0.3
+_LARGE_PAGE_MARGIN_IN = 0.8
+_MAX_DYNAMIC_MARGIN_IN = 1.0
 
 
 def normalize_margin_value(margin: Union[str, int, float]) -> str:
@@ -46,6 +54,48 @@ def normalize_margin_value(margin: Union[str, int, float]) -> str:
             f"Unsupported margin unit: {unit!r}. Supported units: {', '.join(sorted(_UNIT_TO_BP))}."
         )
     return f"{number}{normalized_unit}"
+
+
+def page_size_to_margin(width: Union[int, float], height: Union[int, float]) -> str:
+    """
+    根据页面尺寸动态推导边距。
+
+    输入宽高按渲染阶段实际使用的像素尺寸处理，内部换算为 pt 后，
+    使用页面几何平均边长做线性插值，并限制在一个温和的范围内。
+    """
+    width_px = max(float(width), 0.0)
+    height_px = max(float(height), 0.0)
+    if width_px <= 0 or height_px <= 0:
+        return f"{_SMALL_PAGE_MARGIN_IN:.1f}in"
+
+    page_scale_pt = sqrt(width_px * height_px) * _PX_TO_PT
+    small_scale_pt = sqrt(_SMALL_PAGE_REFERENCE_PT[0] * _SMALL_PAGE_REFERENCE_PT[1])
+    large_scale_pt = sqrt(_LARGE_PAGE_REFERENCE_PT[0] * _LARGE_PAGE_REFERENCE_PT[1])
+
+    if large_scale_pt <= small_scale_pt:
+        margin_in = _SMALL_PAGE_MARGIN_IN
+    else:
+        ratio = (page_scale_pt - small_scale_pt) / (large_scale_pt - small_scale_pt)
+        margin_in = _SMALL_PAGE_MARGIN_IN + ratio * (_LARGE_PAGE_MARGIN_IN - _SMALL_PAGE_MARGIN_IN)
+
+    margin_in = min(max(margin_in, _SMALL_PAGE_MARGIN_IN), _MAX_DYNAMIC_MARGIN_IN)
+    formatted = f"{margin_in:.2f}".rstrip("0").rstrip(".")
+    return f"{formatted}in"
+
+
+def resolve_page_margin_value(
+    margin: Optional[Union[str, int, float]],
+    page_width: Union[int, float],
+    page_height: Union[int, float],
+) -> str:
+    """
+    返回最终可用的边距值。
+
+    显式指定的 margin 原样归一化；未指定时根据页面尺寸动态计算。
+    """
+    if margin is None:
+        return page_size_to_margin(page_width, page_height)
+    return normalize_margin_value(margin)
 
 
 def margin_to_css_value(margin: Union[str, int, float]) -> str:
