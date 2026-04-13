@@ -391,7 +391,7 @@ class EpubProcessor:
         if not segments:
             return []
         payload = [
-            _wrap_html_translation_prompt(segment.raw_html)
+            segment.raw_html
             for segment in segments
         ]
         return self.translation_service.translate_pages(

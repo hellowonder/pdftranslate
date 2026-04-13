@@ -30,9 +30,9 @@ from render_units import font_size_to_css_value, margin_to_css_value
 
 
 DEFAULT_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/microsoft/msyh.ttc",
     str(Path("~/.local/share/fonts/simsun.ttc").expanduser()),
     "/usr/share/fonts/truetype/microsoft/simsun.ttc",
-    "/usr/share/fonts/truetype/microsoft/msyh.ttc",
     "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
@@ -632,6 +632,7 @@ def _build_style_css(
             f"@font-face {{ font-family: 'DocCustomCJK'; src: url('{font_uri}'); font-weight: 400; font-style: normal; }}",
         ]
         bold_font_path = resolve_bold_font_path(font_path)
+        print(f"Bold font path: {bold_font_path}")
         if bold_font_path:
             bold_uri = Path(bold_font_path).resolve().as_uri()
             font_face_rules.append(

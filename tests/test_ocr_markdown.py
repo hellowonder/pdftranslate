@@ -135,6 +135,24 @@ class OCRMarkdownClientInitTest(unittest.TestCase):
             model="gemma4:26b",
         )
 
+    def test_init_ocr_client_uses_chandra_client_for_chandra_models(self) -> None:
+        args = argparse.Namespace(
+            ocr_base_url="http://localhost:8000/v1",
+            ocr_api_key="secret",
+            ocr_model="chandra-ocr",
+        )
+
+        with patch("ocr_client.configure_openai", return_value="client") as mocked_configure, patch(
+            "ocr_client_chandra.ChandraOCRClient"
+        ) as mocked_client:
+            init_ocr_client(args)
+
+        mocked_configure.assert_called_once_with("http://localhost:8000/v1", "secret")
+        mocked_client.assert_called_once_with(
+            client="client",
+            model="chandra-ocr",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -78,8 +78,15 @@ class OCRClient(Protocol):
 
 def init_ocr_client(args: argparse.Namespace) -> OCRClient:
     client = configure_openai(args.ocr_base_url, args.ocr_api_key)
+    model_name = (args.ocr_model or "").lower()
 
-    if "deepseek" in (args.ocr_model or "").lower():
+    if "chandra" in model_name:
+        from ocr_client_chandra import ChandraOCRClient
+        return ChandraOCRClient(
+            client=client,
+            model=args.ocr_model,
+        )
+    if "deepseek" in model_name:
         from ocr_client_deepseek import DeepseekOCRClient
         return DeepseekOCRClient(
             client=client,
