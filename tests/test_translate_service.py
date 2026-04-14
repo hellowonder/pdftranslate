@@ -228,7 +228,9 @@ class TranslationServiceTest(unittest.TestCase):
 
     def test_annotation_prompt_emphasizes_intuition_and_brevity(self) -> None:
         self.assertIn("Focus on mathematical intuition", ANNOTATION_SYSTEM_PROMPT)
-        self.assertIn("Do NOT restate the formal definition in detail", ANNOTATION_SYSTEM_PROMPT)
+        self.assertIn("what the statement means in plain language", ANNOTATION_SYSTEM_PROMPT)
+        self.assertIn("why this concept/result is natural or useful", ANNOTATION_SYSTEM_PROMPT)
+        self.assertIn("Do NOT restate the formal definition or theorem in detail", ANNOTATION_SYSTEM_PROMPT)
         self.assertIn("Keep it short and sharp", ANNOTATION_SYSTEM_PROMPT)
 
     def test_annotation_service_recognizes_numbered_and_bold_headings(self) -> None:
@@ -247,9 +249,14 @@ class TranslationServiceTest(unittest.TestCase):
 
         self.assertTrue(service._should_annotate("Theorem 1.2", "  (i) first claim"))
         self.assertTrue(service._should_annotate("Theorem 1.2", "- second claim"))
+        self.assertTrue(service._should_annotate("Theorem 1.2", "Moreover, the same conclusion holds for quotients."))
+        self.assertTrue(service._should_annotate("Definition 2.1", "Where $d$ denotes the metric function."))
+        self.assertTrue(service._should_annotate("Theorem 1.2", "> $$\nX = Y\n$$\n"))
+        self.assertTrue(service._should_annotate("Theorem 1.2", "**(i)** first claim"))
         self.assertTrue(service._should_annotate("Theorem 1.2", "\\[\nX = Y\n\\]\n"))
         self.assertTrue(service._should_annotate("Theorem 1.2", "$$\nX = Y\n$$\n"))
         self.assertFalse(service._should_annotate("Theorem 1.2", "Proof. This is not part of the statement."))
+        self.assertFalse(service._should_annotate("Theorem 1.2", "Remark 1.3. This is only a side note."))
 
     def test_protect_latex_replaces_formulas_with_placeholders(self) -> None:
         source = "The formula is $E=mc^2$ and $$x+y$$."
@@ -517,6 +524,36 @@ class TranslationServiceTest(unittest.TestCase):
             ),
         )
         self.assertEqual(blocks[-1].text, "Proof. Omitted.\n")
+
+    def test_iter_translation_blocks_keeps_plain_contextual_continuations_in_annotation_block(self) -> None:
+        annotation_service = AnnotationService(client=None, model="fake", enabled=True)
+        service = TranslationService(
+            client=None,
+            model="fake-model",
+            temperature=0.2,
+            max_chunk_chars=200,
+            _annotation_service=annotation_service,
+        )
+        text = (
+            "Definition 2.1. A metric space is a set with a distance.\n\n"
+            "Where the distance function may take the value +infinity.\n\n"
+            "Moreover, this convention is useful in geometric applications.\n\n"
+            "Remark 2.2. This is only a comment.\n"
+        )
+
+        blocks = list(service._iter_translation_blocks(text))
+
+        self.assertEqual(len([block for block in blocks if block.is_annotation]), 1)
+        annotation_block = next(block for block in blocks if block.is_annotation)
+        self.assertEqual(
+            annotation_block.text,
+            (
+                "Definition 2.1. A metric space is a set with a distance.\n\n"
+                "Where the distance function may take the value +infinity.\n\n"
+                "Moreover, this convention is useful in geometric applications.\n\n"
+            ),
+        )
+        self.assertEqual(blocks[-1].text, "Remark 2.2. This is only a comment.\n")
 
     def test_translate_text_block_annotates_combined_multiblock_statement_once(self) -> None:
         annotation_service = AnnotationService(client=None, model="fake", enabled=True)

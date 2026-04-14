@@ -16,12 +16,13 @@ Your task is to explain mathemtaical theorem, proposition, or definition in Simp
 
 Requirements:
 1. goal is to help readers quickly grasp the core intuition and main idea behind the statement.
-2. Focus on mathematical insight, intuition, geometric picture, motivation, or what the statement is really saying.
-3. Do NOT restate the formal definition in detail. The book already contains the rigorous statement.
-4. Keep it simple to understand, no long derivations. Don't provide detailed proof, only a high-level sketch if necessary to convey the intuition.
-5. If the source contains formulas, you may mention them briefly when needed, but prioritize conceptual explanation.
-6. Use precise but accessible Chinese mathematical language.
-7. Output only the explanation body in Simplified Chinese, with no title and no surrounding Markdown block.
+2. Focus on mathematical intuition, insight, geometric picture, motivation, or what the statement is really saying.
+3. Prefer giving 1 to 2 of the following: what the statement means in plain language; why this concept/result is natural or useful; a typical situation where it is used.
+4. Do NOT restate the formal definition or theorem in detail. The book already contains the rigorous statement.
+5. Keep it short and sharp. No long derivations. Don't provide detailed proof, only a high-level sketch if necessary to convey the intuition.
+6. If the source contains formulas, you may mention them briefly when needed, but prioritize conceptual explanation over symbolic restatement.
+7. Use precise but accessible Chinese mathematical language for readers learning the material.
+8. Output only the explanation body in Simplified Chinese, with no title and no surrounding Markdown block.
 """
 
 ANNOTATION_HEADING_RE = re.compile(
@@ -59,6 +60,84 @@ ANNOTATION_CONTINUATION_RE = re.compile(
     re.VERBOSE,
 )
 
+ANNOTATION_STOP_RE = re.compile(
+    r"""
+    ^\s*
+    (?:
+        (?:[#>*-]+\s*)?
+        (?:(?:\*\*|__)\s*)?
+    )?
+    (?:
+        proof
+        |remark
+        |example
+        |examples
+        |note
+        |notes
+        |exercise
+        |exercises
+        |question
+        |questions
+    )
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+ANNOTATION_PLAIN_CONTINUATION_RE = re.compile(
+    r"""
+    ^\s*
+    (?:(?:\*\*|__)\s*)?
+    (?:
+        then
+        |moreover
+        |furthermore
+        |in\ particular
+        |in\ this\ case
+        |more\ generally
+        |equivalently
+        |conversely
+        |consequently
+        |therefore
+        |thus
+        |hence
+        |where
+        |here
+        |in\ other\ words
+        |namely
+        |that\ is
+        |i\.e\.
+    )
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+ANNOTATION_EMPHATIC_ENUM_RE = re.compile(
+    r"""
+    ^\s*
+    (?:
+        >\s*
+    )?
+    (?:
+        \*\*|__
+    )
+    \s*
+    (?:
+        [-+*]
+        |\d+[.)]
+        |[a-zA-Z][.)]
+        |\([a-zA-Z0-9]+\)
+    )
+    \s*
+    (?:
+        \*\*|__
+    )
+    \s+
+    """,
+    re.VERBOSE,
+)
+
 
 @dataclass
 class AnnotationService:
@@ -75,6 +154,22 @@ class AnnotationService:
             return None
         return f"\n\n> **直观理解：** {content}\n"
 
+    def _normalize_block_for_annotation(self, text: str) -> str:
+        """
+        去掉 blockquote / list / 粗体等常见 Markdown 包装，便于做 statement 规则判断。
+        """
+        normalized = text.strip()
+        while True:
+            updated = re.sub(r"^\s*>\s*", "", normalized)
+            updated = re.sub(r"^(?:\*\*|__)(.+?)(?:\*\*|__)(?=\s|$)", r"\1", updated)
+            updated = re.sub(r"^\s*(?:[-+*]|\d+[.)]|[a-zA-Z][.)]|\([a-zA-Z0-9]+\))\s+", "", updated)
+            updated = re.sub(r"^(?:\*\*|__)\s*", "", updated)
+            updated = re.sub(r"\s*(?:\*\*|__)$", "", updated)
+            if updated == normalized:
+                break
+            normalized = updated.strip()
+        return normalized
+
     def _should_annotate(self, current_block: str | None, next_block: str) -> bool:
         """
         if current_block is None, it means next_block is the first block of a section, so we should check if next_block
@@ -84,16 +179,33 @@ class AnnotationService:
           and if so, we should annotate next_block as well.
         """
         stripped = next_block.strip()
+        normalized = self._normalize_block_for_annotation(next_block)
         if not stripped:
             return False
 
         if current_block is None:
-            return bool(ANNOTATION_HEADING_RE.match(stripped))
+            return bool(ANNOTATION_HEADING_RE.match(stripped) or ANNOTATION_HEADING_RE.match(normalized))
 
-        if stripped.startswith("$$") or stripped.startswith(r"\[") or stripped.startswith(r"\begin{"):
+        if ANNOTATION_STOP_RE.match(stripped) or ANNOTATION_STOP_RE.match(normalized):
+            return False
+
+        if (
+            stripped.startswith("$$")
+            or stripped.startswith(r"\[")
+            or stripped.startswith(r"\begin{")
+            or normalized.startswith("$$")
+            or normalized.startswith(r"\[")
+            or normalized.startswith(r"\begin{")
+        ):
             return True
 
-        return bool(ANNOTATION_CONTINUATION_RE.match(next_block))
+        if ANNOTATION_EMPHATIC_ENUM_RE.match(stripped):
+            return True
+
+        if ANNOTATION_CONTINUATION_RE.match(next_block) or ANNOTATION_CONTINUATION_RE.match(normalized):
+            return True
+
+        return bool(ANNOTATION_PLAIN_CONTINUATION_RE.match(normalized))
 
     def _build_messages(self, source_text: str) -> list[dict[str, str]]:
         return [
@@ -102,7 +214,7 @@ class AnnotationService:
                 "role": "user",
                 "content": (
                     "Please explain the following mathematical statement briefly in Simplified Chinese, "
-                    "emphasizing intuition over formal restatement:\n\n"
+                    "emphasizing intuition, motivation, and practical meaning over formal restatement:\n\n"
                     f"{source_text.strip()}"
                 ),
             },
