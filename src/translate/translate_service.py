@@ -142,7 +142,7 @@ class TranslationService:
     latex_formula_handling: LatexFormulaHandlingMode = "placeholder"
     reasoning_effort: ReasoningEffort = "none"
     _annotation_service: Optional[AnnotationService] = None
-    _do_latex_repair: bool = False
+    _do_latex_repair: bool = True
 
     _SHORT_TRANSLATION_USER_CONTENT_MAX_CHARS = 20
 

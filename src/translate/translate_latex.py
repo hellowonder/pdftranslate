@@ -185,8 +185,8 @@ def repair_translation_latex(
     repaired = translation
     for item, best_match in fix_pairs:
         repaired = repaired.replace(item.text, best_match.text)
-    for item in failed_items:
-        repaired = repaired.replace(item.text, append_latex_failure_marker(item))
+    #for item in failed_items:
+    #    repaired = repaired.replace(item.text, append_latex_failure_marker(item))
 
     if fail and debug_stream is not None:
         debug_dump_translation_pair(source, repaired, debug_stream)  # 打印修复前的译文以便对比
