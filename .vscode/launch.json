@@ -30,14 +30,12 @@
       "args": [
         "--input",
         "tests/data/book.pdf",
-        "--pages", "10,11,39",
         "--output-dir",
-        "tests/data/output/one_page_ocr_only",
+        "tests/data/output/book_test",
         "--clear",
-        "--stages",
-        "ocr",
-        // "--ocr-base-url", "http://192.168.3.105:11434/v1",
-        // "--ocr-model", "gemma4:e4b"
+        "--annotation-mode", "page",
+        "--ocr-model", "chandra",
+        "--translation-base-url", "http://192.168.3.105:11434/v1"
       ]
     }
   ]

@@ -25,6 +25,7 @@ from translate_latex import extract_latex_segments, repair_translation_latex
 TranslationMode = Literal["markdown", "html", "plain_text"]
 LatexFormulaHandlingMode = Literal["placeholder", "direct"]
 ReasoningEffort = Literal["none", "low", "medium", "high"]
+AnnotationMode = Literal["none", "item", "page"]
 
 DEFAULT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT = (
 r"""You are a professional English to Chinese translator for mathematical Markdown documents.
@@ -457,7 +458,12 @@ class TranslationService:
                     self._build_messages(block.text, mode=mode),
                 )
             )
-        return "".join(output_parts)
+        translated = "".join(output_parts)
+        if self._annotation_service and self._annotation_service.mode == "page":
+            annotation = self._annotation_service.annotate(text)
+            if annotation:
+                return f"{translated}{annotation}"
+        return translated
 
     def _looks_suspicious_translation(self, source: str, translation: str) -> bool:
         """
@@ -623,9 +629,9 @@ class TranslationService:
             yield TranslationBlock(text=text, protected=False)
             return
 
+        annotation_service = self._annotation_service
         annotation_parts: List[str] = []
         annotation_active = False
-        annotation_service = self._annotation_service
 
         for index, block in enumerate(raw_blocks):
             if block.protected or len(block.text) <= self.max_chunk_chars:
@@ -633,7 +639,7 @@ class TranslationService:
             else:
                 yield from self._iter_plain_translation_chunks(block.text)
 
-            if not annotation_service:
+            if not annotation_service or annotation_service.mode != "item":
                 continue
 
             should_extend = annotation_service._should_annotate(
@@ -918,9 +924,10 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
         help="How to handle LaTeX formulas during translation: replace with placeholders or send directly to the model.",
     )
     parser.add_argument(
-        "--enable-annotation",
-        action="store_true",
-        help="Generate short intuition annotations for theorem/proposition/definition blocks and insert them into translated output.",
+        "--annotation-mode",
+        choices=["none", "item", "page"],
+        default="none",
+        help="Annotation mode: none disables annotations, item annotates theorem/proposition/definition-style items, and page explains each page as a whole.",
     )
     parser.add_argument(
         "--annotation-base-url",
@@ -961,7 +968,8 @@ def init_translation_service(
         TranslationService: 已配置好的翻译服务对象。
     """
     annotation_service = None
-    if getattr(args, "enable_annotation", False):
+    annotation_mode: AnnotationMode = getattr(args, "annotation_mode", "none")
+    if annotation_mode != "none":
         annotation_base_url, annotation_api_key, annotation_model, annotation_reasoning_effort = (
             _resolve_annotation_args(args)
         )
@@ -974,6 +982,7 @@ def init_translation_service(
             model=annotation_model,
             reasoning_effort=annotation_reasoning_effort,
             enabled=True,
+            mode=annotation_mode,
         )
     client = configure_openai(
         base_url=args.translation_base_url,

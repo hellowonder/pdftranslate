@@ -79,12 +79,12 @@ mkdir -p "$output_root"
 default_args=(
   --translation-workers 32
   --generate-interleave-pdf
-  --translation-base-url http://localhost:11434/v1
+  --translation-base-url http://192.168.3.105:11434/v1
   --translation-model gemma4:26b
   --ocr-base-url http://localhost:8000/v1
-  --ocr-model deepseek-ocr:3b
+  --ocr-model chandra
   --translation-latex-formula-handling direct
-  --enable-annotation
+  --annotation-mode page
 )
 
 mapfile -d '' input_files < <(

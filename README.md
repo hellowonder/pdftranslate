@@ -1,6 +1,8 @@
 # PDF Translate
 
-当前提供两个入口：
+这是一个个人项目，用来将英文pdf翻译成中文。
+
+当前提供几个入口：
 
 - `src/translate/pdf_translate.py`：PDF OCR + 翻译，输出 Markdown / PDF
 - `src/translate/epub_translate.py`：EPUB 翻译

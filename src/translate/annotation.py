@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
+from typing import Any, Optional
 
 from llm_util import create_chat_completion_with_retry
 
-ANNOTATION_SYSTEM_PROMPT = """You are a mathematical exposition assistant.
+ITEM_ANNOTATION_SYSTEM_PROMPT = """You are a mathematical exposition assistant.
 
 Your task is to explain mathemtaical theorem, proposition, or definition in Simplified Chinese from an English math text.
 
@@ -24,6 +24,23 @@ Requirements:
 7. Use precise but accessible Chinese mathematical language for readers learning the material.
 8. Output only the explanation body in Simplified Chinese, with no title and no surrounding Markdown block.
 """
+
+PAGE_ANNOTATION_SYSTEM_PROMPT = """You are a mathematical exposition assistant.
+
+Your task is to explain one page of an English mathematical text in Simplified Chinese for a reader who wants intuition first.
+
+Requirements:
+1. Treat the page as a coherent whole. Explain the page's main theme, what problem or idea it is trying to develop, and how the parts fit together.
+2. Strongly emphasize intuition and motivation: what the author is trying to achieve, why the concepts or statements on this page are natural, and what a reader should keep in mind conceptually.
+3. If the page moves too quickly or leaves details implicit, fill in the missing explanatory bridge in a concise but helpful way.
+4. Prefer plain but precise Chinese mathematical language. You may mention formulas briefly, but only to support conceptual understanding.
+5. Do NOT translate the page line by line. Do NOT mechanically restate every sentence. Do NOT give a full proof.
+6. Expand on ideas that are under-explained in the source, especially hidden motivation, geometric meaning, standard examples, or why a definition/result matters.
+7. Keep the explanation focused and readable. A short multi-sentence note is better than a long exhaustive commentary.
+8. Output only the explanation body in Simplified Chinese, with no title and no surrounding Markdown block.
+"""
+
+ANNOTATION_SYSTEM_PROMPT = ITEM_ANNOTATION_SYSTEM_PROMPT
 
 ANNOTATION_HEADING_RE = re.compile(
     r"""
@@ -145,6 +162,7 @@ class AnnotationService:
     model: str
     reasoning_effort: str = "none"
     enabled: bool = False
+    mode: str = "item"
 
     def annotate(self, source_text: str) -> Optional[str]:
         if not self.enabled:
@@ -152,7 +170,15 @@ class AnnotationService:
         content = self._call_annotate(source_text)
         if not content:
             return None
-        return f"\n\n> **直观理解：** {content}\n"
+
+        stripped = content.rstrip("\n")
+        lines = stripped.splitlines()
+        if not lines:
+            return None
+        quoted_lines = [f"> **导读：** {lines[0]}"]
+        quoted_lines.extend(">" if not line.strip() else f"> {line}" for line in lines[1:])
+        return "\n\n" + "\n".join(quoted_lines) + "\n"
+
 
     def _normalize_block_for_annotation(self, text: str) -> str:
         """
@@ -208,16 +234,23 @@ class AnnotationService:
         return bool(ANNOTATION_PLAIN_CONTINUATION_RE.match(normalized))
 
     def _build_messages(self, source_text: str) -> list[dict[str, str]]:
+        if self.mode == "page":
+            system_prompt = PAGE_ANNOTATION_SYSTEM_PROMPT
+            user_prompt = (
+                "Please explain the following page in Simplified Chinese. Focus on intuition, motivation, "
+                "and the page's main idea. Expand the under-explained parts instead of restating the page formally:\n\n"
+                f"{source_text.strip()}"
+            )
+        else:
+            system_prompt = ITEM_ANNOTATION_SYSTEM_PROMPT
+            user_prompt = (
+                "Please explain the following mathematical statement briefly in Simplified Chinese, "
+                "emphasizing intuition, motivation, and practical meaning over formal restatement:\n\n"
+                f"{source_text.strip()}"
+            )
         return [
-            {"role": "system", "content": ANNOTATION_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    "Please explain the following mathematical statement briefly in Simplified Chinese, "
-                    "emphasizing intuition, motivation, and practical meaning over formal restatement:\n\n"
-                    f"{source_text.strip()}"
-                ),
-            },
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
         ]
 
     def _call_annotate(self, source_text: str) -> Optional[str]:
@@ -235,5 +268,10 @@ class AnnotationService:
 
     def _normalize_output(self, text: str) -> str:
         cleaned = re.sub(r"^\s*(?:直观理解|说明|注|注释)\s*[:：]\s*", "", text.strip())
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if self.mode == "page":
+            paragraphs = [re.sub(r"[ \t]+", " ", part).strip() for part in re.split(r"\n\s*\n", cleaned)]
+            paragraphs = [part for part in paragraphs if part]
+            cleaned = "\n\n".join(paragraphs).strip()
+        else:
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
         return cleaned + "\n\n"

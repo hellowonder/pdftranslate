@@ -19,6 +19,7 @@ from translate_service import (  # noqa: E402
     init_translation_service,
 )
 from annotation import AnnotationService  # noqa: E402
+from annotation import PAGE_ANNOTATION_SYSTEM_PROMPT  # noqa: E402
 
 
 class TranslationServiceTest(unittest.TestCase):
@@ -232,6 +233,34 @@ class TranslationServiceTest(unittest.TestCase):
         self.assertIn("why this concept/result is natural or useful", ANNOTATION_SYSTEM_PROMPT)
         self.assertIn("Do NOT restate the formal definition or theorem in detail", ANNOTATION_SYSTEM_PROMPT)
         self.assertIn("Keep it short and sharp", ANNOTATION_SYSTEM_PROMPT)
+
+    def test_page_annotation_prompt_emphasizes_intuition_motivation_and_missing_details(self) -> None:
+        self.assertIn("Treat the page as a coherent whole", PAGE_ANNOTATION_SYSTEM_PROMPT)
+        self.assertIn("Strongly emphasize intuition and motivation", PAGE_ANNOTATION_SYSTEM_PROMPT)
+        self.assertIn("fill in the missing explanatory bridge", PAGE_ANNOTATION_SYSTEM_PROMPT)
+        self.assertIn("Expand on ideas that are under-explained", PAGE_ANNOTATION_SYSTEM_PROMPT)
+
+    def test_page_annotation_normalization_preserves_paragraph_breaks(self) -> None:
+        service = AnnotationService(client=None, model="fake", enabled=True, mode="page")
+
+        normalized = service._normalize_output("第一段说明。\n\n第二段补充动机。")
+
+        self.assertEqual(normalized, "第一段说明。\n\n第二段补充动机。\n\n")
+
+    def test_page_annotation_render_quotes_every_paragraph(self) -> None:
+        service = AnnotationService(client=None, model="fake", enabled=True, mode="page")
+
+        with patch.object(
+            service,
+            "_call_annotate",
+            return_value="第一段说明。\n\n第二段补充动机。\n\n",
+        ):
+            rendered = service.annotate("source")
+
+        self.assertEqual(
+            rendered,
+            "\n\n> **本页导读：** 第一段说明。\n>\n> 第二段补充动机。\n",
+        )
 
     def test_annotation_service_recognizes_numbered_and_bold_headings(self) -> None:
         service = AnnotationService(client=None, model="fake", enabled=True)
@@ -594,6 +623,42 @@ class TranslationServiceTest(unittest.TestCase):
             )
         )
 
+    def test_translate_text_block_appends_page_annotation_once_per_page(self) -> None:
+        annotation_service = AnnotationService(client=None, model="fake", enabled=True, mode="page")
+        service = TranslationService(
+            client=None,
+            model="fake-model",
+            temperature=0.2,
+            max_chunk_chars=200,
+            _annotation_service=annotation_service,
+        )
+        text = (
+            "Definition 2.1. A metric space is a set with a distance.\n\n"
+            "This page explains why the triangle inequality matters.\n"
+        )
+
+        with patch.object(
+            service,
+            "_translate_with_retry",
+            side_effect=lambda source_text, messages: f"ZH::{source_text}",
+        ) as mocked_translate, patch.object(
+            annotation_service,
+            "annotate",
+            return_value="\n\n> **本页导读：** 这一页主要解释距离概念的动机。\n",
+        ) as mocked_annotate:
+            result = service.translate_text_block(text)
+
+        self.assertEqual(
+            result,
+            (
+                "ZH::Definition 2.1. A metric space is a set with a distance.\n\n"
+                "ZH::This page explains why the triangle inequality matters.\n"
+                "\n\n> **本页导读：** 这一页主要解释距离概念的动机。\n"
+            ),
+        )
+        self.assertEqual(mocked_translate.call_count, 2)
+        mocked_annotate.assert_called_once_with(text)
+
     def test_translate_pages_passes_mode_through_to_text_block(self) -> None:
         service = TranslationService(
             client=None,
@@ -614,7 +679,6 @@ class TranslationServiceTest(unittest.TestCase):
 
     def test_init_translation_service_uses_selected_provider(self) -> None:
         args = SimpleNamespace(
-            translation_provider="openai_compatible",
             translation_base_url="http://translate/v1",
             translation_api_key="translate-key",
             translation_model="gemma4:26b",
@@ -622,30 +686,25 @@ class TranslationServiceTest(unittest.TestCase):
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
             translation_latex_formula_handling="placeholder",
-            enable_annotation=False,
-            annotation_provider=None,
+            annotation_mode="none",
             annotation_base_url=None,
             annotation_api_key=None,
             annotation_model=None,
             annotation_reasoning_effort=None,
         )
 
-        with patch("translate_service.configure_translation_client", return_value="codex-client") as mocked_configure:
+        with patch("translate_service.configure_openai", return_value="codex-client") as mocked_configure:
             service = init_translation_service(args)
 
         mocked_configure.assert_called_once_with(
-            provider="openai_compatible",
             base_url="http://translate/v1",
             api_key="translate-key",
-            model="gemma4:26b",
-            reasoning_effort="none",
         )
         self.assertEqual(service.client, "codex-client")
         self.assertEqual(service.reasoning_effort, "none")
 
     def test_init_translation_service_builds_annotation_service_with_own_backend(self) -> None:
         args = SimpleNamespace(
-            translation_provider="openai_compatible",
             translation_base_url="http://translate/v1",
             translation_api_key="translate-key",
             translation_model="gemma4:26b",
@@ -653,8 +712,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
             translation_latex_formula_handling="placeholder",
-            enable_annotation=True,
-            annotation_provider="openai_compatible",
+            annotation_mode="item",
             annotation_base_url="http://annotation/v1",
             annotation_api_key="annotation-key",
             annotation_model="gpt-4o-mini",
@@ -662,7 +720,7 @@ class TranslationServiceTest(unittest.TestCase):
         )
 
         with patch(
-            "translate_service.configure_translation_client",
+            "translate_service.configure_openai",
             side_effect=["annotation-client", "translation-client"],
         ) as mocked_configure:
             service = init_translation_service(args)
@@ -673,10 +731,10 @@ class TranslationServiceTest(unittest.TestCase):
         self.assertEqual(service._annotation_service.client, "annotation-client")
         self.assertEqual(service._annotation_service.model, "gpt-4o-mini")
         self.assertEqual(service._annotation_service.reasoning_effort, "medium")
+        self.assertEqual(service._annotation_service.mode, "item")
 
     def test_init_translation_service_annotation_defaults_to_translation_backend(self) -> None:
         args = SimpleNamespace(
-            translation_provider="openai_compatible",
             translation_base_url="http://translate/v1",
             translation_api_key="translate-key",
             translation_model="gemma4:26b",
@@ -684,8 +742,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
             translation_latex_formula_handling="placeholder",
-            enable_annotation=True,
-            annotation_provider=None,
+            annotation_mode="page",
             annotation_base_url=None,
             annotation_api_key=None,
             annotation_model=None,
@@ -693,7 +750,7 @@ class TranslationServiceTest(unittest.TestCase):
         )
 
         with patch(
-            "translate_service.configure_translation_client",
+            "translate_service.configure_openai",
             side_effect=["annotation-client", "translation-client"],
         ) as mocked_configure:
             service = init_translation_service(args)
@@ -702,15 +759,13 @@ class TranslationServiceTest(unittest.TestCase):
         self.assertEqual(
             mocked_configure.call_args_list[0].kwargs,
             {
-                "provider": "openai_compatible",
                 "base_url": "http://translate/v1",
                 "api_key": "translate-key",
-                "model": "gemma4:26b",
-                "reasoning_effort": "low",
             },
         )
         self.assertIsNotNone(service._annotation_service)
         self.assertEqual(service._annotation_service.model, "gemma4:26b")
+        self.assertEqual(service._annotation_service.mode, "page")
 
 
 if __name__ == "__main__":
