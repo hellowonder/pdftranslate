@@ -28,6 +28,7 @@ ReasoningEffort = Literal["none", "low", "medium", "high"]
 AnnotationMode = Literal["none", "item", "page"]
 TranslationScope = Literal["block", "page"]
 
+# For academic/technical documents with mathematical content
 DEFAULT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT = (
 r"""You are a professional English to Chinese translator for mathematical Markdown documents.
 
@@ -51,6 +52,28 @@ Output only the translated Markdown.
 """
 )
 
+# For general-purpose documents (novels, non-fiction, etc.) without much math
+GENERAL_MARKDOWN_TRANSLATION_SYSTEM_PROMPT = (
+r"""You are a professional English to Chinese translator.
+
+Translate the input Markdown into natural, fluent Simplified Chinese while strictly preserving document structure.
+
+Rules:
+1. Keep all Markdown structure unchanged (headings, lists, bold/italic, links, tables, etc.).
+2. Translate only natural language text.
+3. If there are any LaTeX formulas, keep them exactly unchanged:
+   - Content inside $...$, $$...$$, \(...\), \[...\] must remain exactly unchanged.
+   - Do not translate or rephrase formula content.
+4. Do NOT modify code blocks or inline code.
+5. Preserve blank lines, paragraph breaks, and line boundaries exactly.
+6. Do NOT add explanations, comments, or extra content.
+7. Use natural, fluent Chinese that reads smoothly to native speakers.
+
+Output only the translated Markdown.
+"""
+)
+
+# For academic/technical documents with mathematical content
 DIRECT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT = (
 r"""You are a professional English to Chinese translator for mathematical Markdown documents.
 
@@ -71,6 +94,28 @@ Output only the translated Markdown.
 """
 )
 
+# For general-purpose documents (novels, non-fiction, etc.) without much math
+DIRECT_GENERAL_MARKDOWN_TRANSLATION_SYSTEM_PROMPT = (
+r"""You are a professional English to Chinese translator.
+
+Translate the input Markdown into natural, fluent Simplified Chinese while strictly preserving document structure.
+
+Rules:
+1. Keep all Markdown structure unchanged (headings, lists, bold/italic, links, tables, etc.).
+2. Translate only natural language text.
+3. If there are any LaTeX formulas, keep them exactly unchanged:
+   - Content inside $...$, $$...$$, \(...\), \[...\], and \begin{...}...\end{...} must remain exactly unchanged.
+   - Do not translate or rephrase formula content.
+4. Do NOT modify code blocks or inline code.
+5. Preserve blank lines, paragraph breaks, and line boundaries exactly.
+6. Do NOT add explanations, comments, or extra content.
+7. Use natural, fluent Chinese that reads smoothly to native speakers.
+
+Output only the translated Markdown.
+"""
+)
+
+# For academic/technical documents with mathematical content
 DEFAULT_HTML_TRANSLATION_SYSTEM_PROMPT = (
 r"""You are a professional English to Chinese translator for mathematical HTML documents.
 
@@ -93,6 +138,27 @@ Output only the translated HTML.
 """
 )
 
+# For general-purpose documents (novels, non-fiction, etc.) without much math
+GENERAL_HTML_TRANSLATION_SYSTEM_PROMPT = (
+r"""You are a professional English to Chinese translator.
+
+Translate the input HTML into natural, fluent Simplified Chinese while strictly preserving document structure.
+
+Rules:
+1. Keep all HTML tags, attributes, nesting, and entity structure unchanged.
+2. Translate only natural language text content.
+3. If there are any LaTeX formulas, keep them exactly unchanged:
+   - Content inside $...$, $$...$$, \(...\), \[...\] must remain exactly unchanged.
+   - Do not translate or rephrase formula content.
+4. Do NOT modify code blocks, inline code, URLs, or attribute values.
+5. Do NOT add explanations, comments, or extra wrapper elements.
+6. Use natural, fluent Chinese that reads smoothly to native speakers.
+
+Output only the translated HTML.
+"""
+)
+
+# For academic/technical documents with mathematical content
 DIRECT_HTML_TRANSLATION_SYSTEM_PROMPT = (
 r"""You are a professional English to Chinese translator for mathematical HTML documents.
 
@@ -107,6 +173,26 @@ Rules:
 4. Do NOT modify code blocks, inline code, URLs, or attribute values.
 5. Do NOT add explanations, comments, or extra wrapper elements.
 6. Use accurate and standard Chinese mathematical terminology.
+
+Output only the translated HTML.
+"""
+)
+
+# For general-purpose documents (novels, non-fiction, etc.) without much math
+DIRECT_GENERAL_HTML_TRANSLATION_SYSTEM_PROMPT = (
+r"""You are a professional English to Chinese translator.
+
+Translate the input HTML into natural, fluent Simplified Chinese while strictly preserving document structure.
+
+Rules:
+1. Keep all HTML tags, attributes, nesting, and entity structure unchanged.
+2. Translate only natural language text content.
+3. If there are any LaTeX formulas, keep them exactly unchanged:
+   - Content inside $...$, $$...$$, \(...\), \[...\], and \begin{...}...\end{...} must remain exactly unchanged.
+   - Do not translate or rephrase formula content.
+4. Do NOT modify code blocks, inline code, URLs, or attribute values.
+5. Do NOT add explanations, comments, or extra wrapper elements.
+6. Use natural, fluent Chinese that reads smoothly to native speakers.
 
 Output only the translated HTML.
 """
@@ -144,6 +230,7 @@ class TranslationService:
     scope: TranslationScope = "block"
     latex_formula_handling: LatexFormulaHandlingMode = "placeholder"
     reasoning_effort: ReasoningEffort = "none"
+    document_type: Literal["academic", "general"] = "academic"
     _annotation_service: Optional[AnnotationService] = None
     _do_latex_repair: bool = True
 
@@ -195,14 +282,24 @@ class TranslationService:
 
     def _get_system_prompt(self, mode: TranslationMode) -> str:
         if mode == "html":
-            if self.latex_formula_handling == "direct":
-                return DIRECT_HTML_TRANSLATION_SYSTEM_PROMPT
-            return DEFAULT_HTML_TRANSLATION_SYSTEM_PROMPT
+            if self.document_type == "general":
+                if self.latex_formula_handling == "direct":
+                    return DIRECT_GENERAL_HTML_TRANSLATION_SYSTEM_PROMPT
+                return GENERAL_HTML_TRANSLATION_SYSTEM_PROMPT
+            else:
+                if self.latex_formula_handling == "direct":
+                    return DIRECT_HTML_TRANSLATION_SYSTEM_PROMPT
+                return DEFAULT_HTML_TRANSLATION_SYSTEM_PROMPT
         if mode == "plain_text":
             return DEFAULT_PLAIN_TEXT_TRANSLATION_SYSTEM_PROMPT
-        if self.latex_formula_handling == "direct":
-            return DIRECT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT
-        return DEFAULT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT
+        if self.document_type == "general":
+            if self.latex_formula_handling == "direct":
+                return DIRECT_GENERAL_MARKDOWN_TRANSLATION_SYSTEM_PROMPT
+            return GENERAL_MARKDOWN_TRANSLATION_SYSTEM_PROMPT
+        else:
+            if self.latex_formula_handling == "direct":
+                return DIRECT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT
+            return DEFAULT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT
 
     def _need_translate(self, text: str) -> bool:
         """
@@ -953,8 +1050,9 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--annotation-mode",
         choices=["none", "item", "page"],
-        default="none",
-        help="Annotation mode: none disables annotations, item annotates theorem/proposition/definition-style items, and page explains each page as a whole.",
+        default=None,
+        help="Annotation mode: none disables annotations, item annotates theorem/proposition/definition-style items, and page explains each page as a whole. "
+             "Defaults to 'item' for academic documents, 'none' for general documents.",
     )
     parser.add_argument(
         "--annotation-base-url",
@@ -973,10 +1071,53 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
         choices=["none", "low", "medium", "high"],
         help="Best-effort reasoning/thinking level requested from the annotation backend. Defaults to --translation-reasoning-effort.",
     )
+    parser.add_argument(
+        "--document-type",
+        choices=["academic", "general"],
+        default="academic",
+        help=(
+            "Document type: 'academic' for academic books/papers with mathematical content "
+            "uses math-specific prompts and terminology; 'general' for novels, non-fiction and "
+            "other general content focuses on natural fluent translation."
+        ),
+    )
+    parser.add_argument(
+        "--no-latex-repair",
+        dest="do_latex_repair",
+        action="store_false",
+        default=None,
+        help="Disable LaTeX formula repair after translation. Defaults to False for general documents, True for academic.",
+    )
+    parser.add_argument(
+        "--do-latex-repair",
+        dest="do_latex_repair",
+        action="store_true",
+        default=None,
+        help="Enable LaTeX formula repair after translation.",
+    )
 
 
 def validate_translation_args(args: argparse.Namespace) -> None:
+    # Set default annotation_mode based on document_type if not explicitly specified
+    document_type = getattr(args, "document_type", "academic")
+    annotation_mode = getattr(args, "annotation_mode", None)
+    if annotation_mode is None:
+        if document_type == "academic":
+            # For academic documents with math, default to page-level annotations
+            args.annotation_mode = "page"
+        else:
+            # For general documents always disable annotation
+            args.annotation_mode = "none"
     annotation_mode = getattr(args, "annotation_mode", "none")
+
+    # Set default do_latex_repair based on document_type if not explicitly specified
+    do_latex_repair = getattr(args, "do_latex_repair", None)
+    if do_latex_repair is None:
+        if document_type == "academic":
+            args.do_latex_repair = True
+        else:
+            args.do_latex_repair = False
+
     translation_scope = getattr(args, "translation_scope", "block")
     if annotation_mode == "item" and translation_scope != "block":
         raise ValueError(
@@ -1034,5 +1175,7 @@ def init_translation_service(
         scope=getattr(args, "translation_scope", "block"),
         latex_formula_handling=args.translation_latex_formula_handling,
         reasoning_effort=args.translation_reasoning_effort,
+        document_type=getattr(args, "document_type", "academic"),
         _annotation_service=annotation_service,
+        _do_latex_repair=getattr(args, "do_latex_repair", True),
     )
