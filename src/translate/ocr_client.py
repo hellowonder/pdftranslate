@@ -97,8 +97,8 @@ def init_ocr_client(args: argparse.Namespace) -> OCRClient:
             model=args.ocr_model,
         )
     else:
-        from ocr_gemma_client import GemmaOCRClient
-        return GemmaOCRClient(
+        from ocr_mmllm_client import MMLLMOcrClient
+        return MMLLMOcrClient(
             client=client,
             model=args.ocr_model,
         )

@@ -105,8 +105,8 @@ class RenderStageDocumentSupportTest(unittest.TestCase):
 
         self.assertEqual(mocked_build.call_args.kwargs["original_pdf_pages"], ["pdf-page-1"])
 
-    def test_render_stage_outputs_exist_only_requires_translated_pdf(self) -> None:
-        args = SimpleNamespace(generate_interleave_pdf=False)
+    def test_render_stage_outputs_exist_requires_enabled_translation_only_pdf(self) -> None:
+        args = SimpleNamespace(generate_interleave_pdf=False, generate_translation_only_pdf=True)
         output_paths = {
             "translated_pdf": str(PROJECT_ROOT / "tests" / "data" / "output" / "translated-only.pdf"),
             "interleaved_pdf": str(PROJECT_ROOT / "tests" / "data" / "output" / "interleaved.pdf"),
@@ -118,8 +118,21 @@ class RenderStageDocumentSupportTest(unittest.TestCase):
         finally:
             Path(output_paths["translated_pdf"]).unlink(missing_ok=True)
 
+    def test_render_stage_outputs_exist_defaults_to_interleaved_pdf_only(self) -> None:
+        args = SimpleNamespace(generate_interleave_pdf=True, generate_translation_only_pdf=False)
+        output_paths = {
+            "translated_pdf": str(PROJECT_ROOT / "tests" / "data" / "output" / "translated-only.pdf"),
+            "interleaved_pdf": str(PROJECT_ROOT / "tests" / "data" / "output" / "interleaved.pdf"),
+        }
+        Path(output_paths["interleaved_pdf"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_paths["interleaved_pdf"]).write_bytes(b"%PDF-1.4\n")
+        try:
+            self.assertTrue(render_stage_outputs_exist(args, output_paths))
+        finally:
+            Path(output_paths["interleaved_pdf"]).unlink(missing_ok=True)
+
     def test_load_render_page_images_step_skips_pdf_images_for_weasyprint(self) -> None:
-        args = SimpleNamespace(generate_interleave_pdf=True)
+        args = SimpleNamespace(generate_interleave_pdf=True, generate_translation_only_pdf=False)
         output_paths = {
             "input_pdf": str(PROJECT_ROOT / "tests" / "data" / "one_page.pdf"),
             "translated_pdf": str(PROJECT_ROOT / "tests" / "data" / "output" / "translated-only.pdf"),

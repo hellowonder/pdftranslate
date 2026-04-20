@@ -20,6 +20,7 @@ from translate_service import (
     TranslationService,
     add_translation_arguments,
     init_translation_service,
+    validate_translation_args,
 )
 
 SUPPORTED_BLOCK_TAGS: Tuple[str, ...] = (
@@ -240,7 +241,12 @@ def parse_args() -> argparse.Namespace:
         help="Allow overwriting the output EPUB if it already exists.",
     )
     add_translation_arguments(parser)
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        validate_translation_args(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
 
 
 class EpubProcessor:

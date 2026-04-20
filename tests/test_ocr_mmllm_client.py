@@ -12,10 +12,10 @@ if str(TRANSLATE_SRC) not in sys.path:
     sys.path.insert(0, str(TRANSLATE_SRC))
 
 from ocr_client import OCRPageRequest  # noqa: E402
-from ocr_gemma_client import GemmaOCRClient  # noqa: E402
+from ocr_mmllm_client import MMLLMOcrClient  # noqa: E402
 
 
-class GemmaOCRClientTest(unittest.TestCase):
+class MMLLMOcrClientTest(unittest.TestCase):
     def test_recognize_page_returns_markdown_and_crops_grounded_images(self) -> None:
         grounded_output = """Top paragraph.
 
@@ -28,7 +28,7 @@ Figure 1. Caption text.
         )
         chat_client = MagicMock()
         chat_client.chat.completions.create.return_value = mock_response
-        client = GemmaOCRClient(
+        client = MMLLMOcrClient(
             client=chat_client,
             model="gemma4:26b",
         )
@@ -49,6 +49,25 @@ Figure 1. Caption text.
         self.assertEqual(result.raw_text, grounded_output)
         self.assertIn("![](images/1_0.jpg)", result.markdown)
         self.assertTrue((output_dir / "1_0.jpg").exists())
+
+    def test_infer_image_requests_reasoning_none(self) -> None:
+        mock_response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Plain text."))]
+        )
+        chat_client = MagicMock()
+        chat_client.chat.completions.create.return_value = mock_response
+        client = MMLLMOcrClient(
+            client=chat_client,
+            model="gemma4:26b",
+        )
+
+        client.infer_image(Image.new("RGB", (100, 100), "white"))
+
+        chat_client.chat.completions.create.assert_called_once()
+        self.assertEqual(
+            chat_client.chat.completions.create.call_args.kwargs["extra_body"],
+            {"reasoning": {"effort": "none"}},
+        )
 
 
 if __name__ == "__main__":

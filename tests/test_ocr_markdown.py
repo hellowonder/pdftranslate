@@ -125,7 +125,7 @@ class OCRMarkdownClientInitTest(unittest.TestCase):
         )
 
         with patch("ocr_client.configure_openai", return_value="client") as mocked_configure, patch(
-            "ocr_gemma_client.GemmaOCRClient"
+            "ocr_mmllm_client.MMLLMOcrClient"
         ) as mocked_client:
             init_ocr_client(args)
 

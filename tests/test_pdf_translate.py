@@ -56,8 +56,39 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
         self.assertIsNone(args.margin)
         self.assertEqual(args.font_size, "9.5pt")
         self.assertTrue(args.vllm_sleep)
+        self.assertTrue(args.generate_interleave_pdf)
+        self.assertFalse(args.generate_translation_only_pdf)
         self.assertEqual(args.translation_base_url, "http://localhost:11434/v1")
         self.assertEqual(args.translation_reasoning_effort, "none")
+
+    def test_parse_args_accepts_translation_only_pdf_output(self) -> None:
+        argv = [
+            "pdf_translate.py",
+            "--input",
+            "tests/data/one_page.pdf",
+            "--output-dir",
+            "tests/data/output",
+            "--generate-translation-only-pdf",
+        ]
+
+        with patch.object(sys, "argv", argv):
+            args = parse_args()
+
+        self.assertTrue(args.generate_interleave_pdf)
+        self.assertTrue(args.generate_translation_only_pdf)
+
+    def test_parse_args_rejects_render_with_no_pdf_outputs(self) -> None:
+        argv = [
+            "pdf_translate.py",
+            "--input",
+            "tests/data/one_page.pdf",
+            "--output-dir",
+            "tests/data/output",
+            "--no-generate-interleave-pdf",
+        ]
+
+        with patch.object(sys, "argv", argv), self.assertRaises(SystemExit):
+            parse_args()
 
     def test_parse_args_accepts_vllm_sleep(self) -> None:
         argv = [
@@ -89,6 +120,38 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
             args = parse_args()
 
         self.assertEqual(args.translation_base_url, "http://localhost:9999/v1")
+
+    def test_parse_args_accepts_translation_scope(self) -> None:
+        argv = [
+            "pdf_translate.py",
+            "--input",
+            "tests/data/one_page.pdf",
+            "--output-dir",
+            "tests/data/output",
+            "--translation-scope",
+            "page",
+        ]
+
+        with patch.object(sys, "argv", argv):
+            args = parse_args()
+
+        self.assertEqual(args.translation_scope, "page")
+
+    def test_parse_args_rejects_item_annotation_with_page_scope(self) -> None:
+        argv = [
+            "pdf_translate.py",
+            "--input",
+            "tests/data/one_page.pdf",
+            "--output-dir",
+            "tests/data/output",
+            "--annotation-mode",
+            "item",
+            "--translation-scope",
+            "page",
+        ]
+
+        with patch.object(sys, "argv", argv), self.assertRaises(SystemExit):
+            parse_args()
 
     def test_resolve_target_page_numbers_uses_generic_document_page_count(self) -> None:
         args = SimpleNamespace(pages="1-2")

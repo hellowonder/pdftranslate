@@ -13,7 +13,9 @@ from translate_stage import load_translate_stage_outputs
 
 
 def render_stage_outputs_exist(args, output_paths: dict[str, str]) -> bool:
-    required_paths = [output_paths["translated_pdf"]]
+    required_paths = []
+    if getattr(args, "generate_translation_only_pdf", False):
+        required_paths.append(output_paths["translated_pdf"])
     if args.generate_interleave_pdf:
         required_paths.append(output_paths["interleaved_pdf"])
     return all(Path(path).exists() for path in required_paths)
@@ -109,7 +111,10 @@ def load_render_page_images_step(
     if is_pdf_input(output_paths["input_pdf"]):
         return []
     needs_page_images = (
-        not Path(output_paths["translated_pdf"]).exists()
+        (
+            getattr(args, "generate_translation_only_pdf", False)
+            and not Path(output_paths["translated_pdf"]).exists()
+        )
         or (args.generate_interleave_pdf and not Path(output_paths["interleaved_pdf"]).exists())
     )
     if not needs_page_images:
@@ -130,10 +135,14 @@ def run_render_stage(
         print("Render stage outputs already exist, skipping render stage.", file=sys.stderr)
         return
 
+    expected_outputs = []
+    if getattr(args, "generate_translation_only_pdf", False):
+        expected_outputs.append(output_paths["translated_pdf"])
+    if args.generate_interleave_pdf:
+        expected_outputs.append(output_paths["interleaved_pdf"])
     print(
         "Starting render stage. Expected outputs: "
-        f"{output_paths['translated_pdf']}"
-        + (f" and {output_paths['interleaved_pdf']}" if args.generate_interleave_pdf else "")
+        + " and ".join(expected_outputs)
         + ".",
         file=sys.stderr,
     )
@@ -143,7 +152,10 @@ def run_render_stage(
     # Output: no file written here; returns render context for PDF generation.
     selected_pdf_pages, selected_page_sizes = collect_original_pdf_metadata(pdf_reader, page_numbers)
 
-    if not Path(output_paths["translated_pdf"]).exists():
+    if (
+        getattr(args, "generate_translation_only_pdf", False)
+        and not Path(output_paths["translated_pdf"]).exists()
+    ):
         render_translation_only_pdf(
             args,
             output_pdf_path=output_paths["translated_pdf"],

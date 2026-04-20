@@ -26,6 +26,7 @@ TranslationMode = Literal["markdown", "html", "plain_text"]
 LatexFormulaHandlingMode = Literal["placeholder", "direct"]
 ReasoningEffort = Literal["none", "low", "medium", "high"]
 AnnotationMode = Literal["none", "item", "page"]
+TranslationScope = Literal["block", "page"]
 
 DEFAULT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT = (
 r"""You are a professional English to Chinese translator for mathematical Markdown documents.
@@ -140,6 +141,7 @@ class TranslationService:
     model: str
     temperature: float
     max_chunk_chars: int = DEFAULT_TRANSLATION_MAX_CHUNK_CHARS
+    scope: TranslationScope = "block"
     latex_formula_handling: LatexFormulaHandlingMode = "placeholder"
     reasoning_effort: ReasoningEffort = "none"
     _annotation_service: Optional[AnnotationService] = None
@@ -438,6 +440,22 @@ class TranslationService:
         """
         if not text:
             return ""
+        if self.scope == "page" and mode != "plain_text":
+            return self._translate_page_text(text, mode=mode)
+        return self._translate_block_text(text, mode=mode)
+
+    def _translate_page_text(self, text: str, mode: TranslationMode = "markdown") -> str:
+        translated = self._translate_with_retry(
+            text,
+            self._build_messages(text, mode=mode),
+        )
+        if self._annotation_service and self._annotation_service.mode == "page":
+            annotation = self._annotation_service.annotate(text)
+            if annotation:
+                return f"{translated}{annotation}"
+        return translated
+
+    def _translate_block_text(self, text: str, mode: TranslationMode = "markdown") -> str:
         output_parts: List[str] = []
         for block in self._iter_translation_blocks(text):
             if not block.text:
@@ -488,8 +506,8 @@ class TranslationService:
         if max(len(source), len(translation)) < 100:
             return False
 
-        if self._looks_untranslated(source, translation):
-            return True
+        # if self._looks_untranslated(source, translation):
+        #     return True
 
         return False
 
@@ -918,6 +936,15 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
         help="Maximum source characters per translation request.",
     )
     parser.add_argument(
+        "--translation-scope",
+        choices=["block", "page"],
+        default="block",
+        help=(
+            "Translation request scope: block translates each page in smaller Markdown/HTML blocks; "
+            "page translates each page in a single request."
+        ),
+    )
+    parser.add_argument(
         "--translation-latex-formula-handling",
         choices=["placeholder", "direct"],
         default="direct",
@@ -948,6 +975,16 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def validate_translation_args(args: argparse.Namespace) -> None:
+    annotation_mode = getattr(args, "annotation_mode", "none")
+    translation_scope = getattr(args, "translation_scope", "block")
+    if annotation_mode == "item" and translation_scope != "block":
+        raise ValueError(
+            "--annotation-mode=item requires --translation-scope=block; "
+            "page scope is only supported with --annotation-mode=none or page."
+        )
+
+
 def _resolve_annotation_args(args: argparse.Namespace) -> tuple[str, str, str, str]:
     base_url = args.annotation_base_url or args.translation_base_url
     api_key = args.annotation_api_key or args.translation_api_key
@@ -967,6 +1004,7 @@ def init_translation_service(
     返回:
         TranslationService: 已配置好的翻译服务对象。
     """
+    validate_translation_args(args)
     annotation_service = None
     annotation_mode: AnnotationMode = getattr(args, "annotation_mode", "none")
     if annotation_mode != "none":
@@ -993,6 +1031,7 @@ def init_translation_service(
         model=args.translation_model,
         temperature=args.translation_temperature,
         max_chunk_chars=args.translation_max_chunk_chars,
+        scope=getattr(args, "translation_scope", "block"),
         latex_formula_handling=args.translation_latex_formula_handling,
         reasoning_effort=args.translation_reasoning_effort,
         _annotation_service=annotation_service,

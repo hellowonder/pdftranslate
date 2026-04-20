@@ -9,7 +9,7 @@ from pypdf import PdfReader
 
 from document_io import normalize_document_input
 from ocr_stage import run_ocr_stage
-from translate_service import add_translation_arguments
+from translate_service import add_translation_arguments, validate_translation_args
 from translate_stage import run_translate_stage
 from render_weasyprint import DEFAULT_KATEX_CSS_PATH
 from render_stage import run_render_stage
@@ -185,6 +185,19 @@ def parse_args():
         action="store_false",
         help="Disable generation of the interleaved PDF.",
     )
+    parser.add_argument(
+        "--generate-translation-only-pdf",
+        dest="generate_translation_only_pdf",
+        action="store_true",
+        default=False,
+        help="Generate the translation-only PDF.",
+    )
+    parser.add_argument(
+        "--no-generate-translation-only-pdf",
+        dest="generate_translation_only_pdf",
+        action="store_false",
+        help="Disable generation of the translation-only PDF.",
+    )
     parser.add_argument("--no-translation", action="store_true", help="whether skip translation")
     parser.add_argument(
         "--skip-first-page-translation",
@@ -204,6 +217,14 @@ def parse_args():
     args = parser.parse_args()
     try:
         args.selected_stages = parse_stage_selection(args.stages)
+        validate_translation_args(args)
+        if "render" in args.selected_stages and not (
+            args.generate_interleave_pdf or args.generate_translation_only_pdf
+        ):
+            parser.error(
+                "At least one render output must be enabled: "
+                "--generate-interleave-pdf or --generate-translation-only-pdf."
+            )
     except ValueError as exc:
         parser.error(str(exc))
     return args

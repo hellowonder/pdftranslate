@@ -6,7 +6,7 @@ from openai import OpenAI
 from ocr_client import OCRPageRequest, OCRPageResult, encode_image_to_data_url, looks_invalid_ocr_output
 from ocr_gemma_postprocess import build_gemma_page_markdown
 
-DEFAULT_GEMMA_OCR_PROMPT = '''Convert this book page image into clean, structured markdown.
+DEFAULT_MMLLM_OCR_PROMPT = '''Convert this book page image into clean, structured markdown.
 
 Requirements:
 
@@ -60,9 +60,10 @@ Requirements:
    - Do not include explanations, comments, or extra text'''
 
 DEFAULT_OCR_MAX_RETRIES = 1
+DEFAULT_OCR_REASONING_EFFORT = "none"
 
 
-class GemmaOCRClient:
+class MMLLMOcrClient:
     def __init__(
         self,
         client: OpenAI,
@@ -87,17 +88,18 @@ class GemmaOCRClient:
                     model=self.model,
                     messages=messages,
                     temperature=0.0,
+                    extra_body={"reasoning": {"effort": DEFAULT_OCR_REASONING_EFFORT}},
                 )
                 content = response.choices[0].message.content or ""
                 return content, True
             except Exception as exc:
-                print(f"Gemma OCR inference error: {exc}")
+                print(f"MMLLM OCR inference error: {exc}")
                 continue
         return "", False
 
     def infer_image(self, image) -> str:
         data_url = encode_image_to_data_url(image)
-        content, suc = self._infer_with_retry(DEFAULT_GEMMA_OCR_PROMPT, data_url)
+        content, suc = self._infer_with_retry(DEFAULT_MMLLM_OCR_PROMPT, data_url)
         if not suc:
             return content
         if not looks_invalid_ocr_output(content):

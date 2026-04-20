@@ -677,6 +677,31 @@ class TranslationServiceTest(unittest.TestCase):
         self.assertEqual(result, ["html::<p>hello</p>"])
         self.assertEqual(mocked_translate.call_args.kwargs["mode"], "html")
 
+    def test_page_scope_translates_whole_page_in_single_request(self) -> None:
+        service = TranslationService(
+            client=None,
+            model="fake-model",
+            temperature=0.2,
+            max_chunk_chars=10,
+            scope="page",
+        )
+        text = "First paragraph.\n\nSecond paragraph."
+
+        with patch.object(
+            service,
+            "_translate_with_retry",
+            return_value="整页译文",
+        ) as mocked_translate, patch.object(
+            service,
+            "_iter_translation_blocks",
+            side_effect=AssertionError("page scope should not iterate block translation"),
+        ):
+            result = service.translate_text_block(text)
+
+        self.assertEqual(result, "整页译文")
+        mocked_translate.assert_called_once()
+        self.assertEqual(mocked_translate.call_args.args[0], text)
+
     def test_init_translation_service_uses_selected_provider(self) -> None:
         args = SimpleNamespace(
             translation_base_url="http://translate/v1",
@@ -685,6 +710,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_reasoning_effort="none",
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
+            translation_scope="block",
             translation_latex_formula_handling="placeholder",
             annotation_mode="none",
             annotation_base_url=None,
@@ -702,6 +728,7 @@ class TranslationServiceTest(unittest.TestCase):
         )
         self.assertEqual(service.client, "codex-client")
         self.assertEqual(service.reasoning_effort, "none")
+        self.assertEqual(service.scope, "block")
 
     def test_init_translation_service_builds_annotation_service_with_own_backend(self) -> None:
         args = SimpleNamespace(
@@ -711,6 +738,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_reasoning_effort="none",
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
+            translation_scope="block",
             translation_latex_formula_handling="placeholder",
             annotation_mode="item",
             annotation_base_url="http://annotation/v1",
@@ -741,6 +769,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_reasoning_effort="low",
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
+            translation_scope="page",
             translation_latex_formula_handling="placeholder",
             annotation_mode="page",
             annotation_base_url=None,
@@ -766,6 +795,27 @@ class TranslationServiceTest(unittest.TestCase):
         self.assertIsNotNone(service._annotation_service)
         self.assertEqual(service._annotation_service.model, "gemma4:26b")
         self.assertEqual(service._annotation_service.mode, "page")
+        self.assertEqual(service.scope, "page")
+
+    def test_init_translation_service_rejects_item_annotation_with_page_scope(self) -> None:
+        args = SimpleNamespace(
+            translation_base_url="http://translate/v1",
+            translation_api_key="translate-key",
+            translation_model="gemma4:26b",
+            translation_reasoning_effort="low",
+            translation_temperature=0.2,
+            translation_max_chunk_chars=1200,
+            translation_scope="page",
+            translation_latex_formula_handling="placeholder",
+            annotation_mode="item",
+            annotation_base_url=None,
+            annotation_api_key=None,
+            annotation_model=None,
+            annotation_reasoning_effort=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires --translation-scope=block"):
+            init_translation_service(args)
 
 
 if __name__ == "__main__":
