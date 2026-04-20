@@ -111,6 +111,14 @@ default_args=(
   --translation-scope page
 )
 
+safe_output_name() {
+  perl -CS -Mutf8 -pe '
+    s/[^\p{L}\p{N}_-]+/_/g;
+    s/_+/_/g;
+    s/^_+|_+$//g;
+  ' <<< "$1"
+}
+
 input_files=()
 
 if [[ "$input_mode" == "directory" ]]; then
@@ -163,7 +171,10 @@ for input_path in "${input_files[@]}"; do
 
   rel_path=${input_path#"$input_root"/}
   rel_no_ext=${rel_path%.*}
-  rel_no_ext=${rel_no_ext//[^a-zA-Z0-9_-]/_}
+  rel_no_ext=$(safe_output_name "$rel_no_ext")
+  if [[ -z "$rel_no_ext" ]]; then
+    rel_no_ext="document"
+  fi
   file_output_dir="$output_root/$rel_no_ext"
   mkdir -p "$file_output_dir"
 
