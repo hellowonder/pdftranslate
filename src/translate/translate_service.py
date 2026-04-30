@@ -335,7 +335,21 @@ class TranslationService:
         cleaned = re.sub(r"<[^>]+>", "", cleaned)
         return cleaned
             
-    def _translate_with_retry(self, source_text: str, messages: Sequence[dict[str, str]]) -> str:
+    def _should_handle_latex(self, mode: TranslationMode) -> bool:
+        """
+        仅 Markdown 输入启用 LaTeX 保护/修复。
+
+        EPUB 翻译走 HTML 片段模式，段落不是 Markdown 语义块，不应额外做
+        LaTeX 占位保护或修复，避免误判普通文本中的符号。
+        """
+        return mode == "markdown"
+
+    def _translate_with_retry(
+        self,
+        source_text: str,
+        messages: Sequence[dict[str, str]],
+        mode: TranslationMode = "markdown",
+    ) -> str:
         """
         调用翻译模型并在结果可疑或 LaTeX 校验失败时自动重试。
 
@@ -351,7 +365,9 @@ class TranslationService:
         if not self._need_translate(core_text):
             return source_text
         
-        if self.latex_formula_handling == "placeholder":
+        should_handle_latex = self._should_handle_latex(mode)
+
+        if should_handle_latex and self.latex_formula_handling == "placeholder":
             request_text, formula_map = self._protect_latex(core_text)
         else:
             request_text, formula_map = core_text, []
@@ -383,10 +399,12 @@ class TranslationService:
             # translation failed with retry, avoid further processing and return original text
             return source_text
 
-        if self.latex_formula_handling == "placeholder":
+        if should_handle_latex and self.latex_formula_handling == "placeholder":
             content, latex_ok = self._restore_latex(content, formula_map)
-        else:
+        elif should_handle_latex:
             content, latex_ok = self._repair_translation_latex(core_text, content)
+        else:
+            latex_ok = True
 
         return self._restore_outer_whitespace(leading, trailing, content)
 
@@ -545,6 +563,7 @@ class TranslationService:
         translated = self._translate_with_retry(
             text,
             self._build_messages(text, mode=mode),
+            mode=mode,
         )
         if self._annotation_service and self._annotation_service.mode == "page":
             annotation = self._annotation_service.annotate(text)
@@ -571,6 +590,7 @@ class TranslationService:
                 self._translate_with_retry(
                     block.text,
                     self._build_messages(block.text, mode=mode),
+                    mode=mode,
                 )
             )
         translated = "".join(output_parts)

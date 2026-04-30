@@ -4,24 +4,28 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/batch_translate_docs.sh <input-dir-or-list-file> [output-root] [extra pdf_translate args...]
-  scripts/batch_translate_docs.sh <input-dir-or-list-file> [--] [extra pdf_translate args...]
+  scripts/batch_translate_docs.sh <input-dir-or-list-file> [output-root] [extra translator args...]
+  scripts/batch_translate_docs.sh <input-dir-or-list-file> [--] [extra translator args...]
 
 Description:
-  If the input is a directory, recursively translate all .pdf, .djvu, and .djv
-  files under it.
+  If the input is a directory, recursively translate all .pdf, .djvu, .djv,
+  and .epub files under it.
 
   If the input is a file, read it as a document list. Blank lines and lines
   starting with "#" or "//" are ignored. Other lines are document paths to
   translate. Relative paths are resolved from the list file's directory.
 
-Defaults passed to pdf_translate.py:
+Defaults passed to PDF/DjVu translation:
   --generate-interleave-pdf
-  --translation-base-url http://localhost:11434/v1
   --translation-model gemma4:26b
-  --ocr-base-url http://localhost:11434/v1
-  --ocr-model deepseek-ocr:3b
+  --translation-base-url http://192.168.3.105:11434/v1
+  --ocr-base-url http://localhost:8000/v1
+  --ocr-model chandra
   --translation-latex-formula-handling direct
+
+Defaults passed to EPUB translation:
+  --translation-model gemma4:26b
+  --translation-base-url http://192.168.3.105:11434/v1
 
 Output layout:
   Each source file gets its own output directory under [output-root].
@@ -99,17 +103,22 @@ output_root=$(realpath -m "$output_root")
 
 mkdir -p "$output_root"
 
-default_args=(
+shared_translation_args=(
   --translation-workers 32
-  --generate-interleave-pdf
   --translation-base-url http://192.168.3.105:11434/v1
   --translation-model gemma4:26b
+)
+
+pdf_default_args=(
+  --generate-interleave-pdf
   --ocr-base-url http://localhost:8000/v1
   --ocr-model chandra
   --translation-latex-formula-handling direct
-  --annotation-mode page
+  --annotation-mode none
   --translation-scope page
 )
+
+epub_default_args=()
 
 safe_output_name() {
   perl -CS -Mutf8 -pe '
@@ -121,9 +130,35 @@ safe_output_name() {
 
 input_files=()
 
+is_translated_input() {
+  local path_name
+  path_name=$(basename "$1")
+  path_name=${path_name,,}
+
+  [[ "$path_name" == *_interleaved.pdf ]] \
+    || [[ "$path_name" == *_interleaved.epub ]] \
+    || [[ "$path_name" == *_cn.pdf ]] \
+    || [[ "$path_name" == *_cn.epub ]] \
+    || [[ "$path_name" == *.cropped.pdf ]]
+}
+
+pdf_outputs_exist() {
+  local output_dir=$1
+  compgen -G "$output_dir/*_interleaved.pdf" > /dev/null
+}
+
+epub_outputs_exist() {
+  local interleaved_output=$1
+  local cn_output=$2
+  [[ -f "$interleaved_output" || -f "$cn_output" ]]
+}
+
 if [[ "$input_mode" == "directory" ]]; then
   mapfile -d '' input_files < <(
-    find "$input_root" -type f \( -iname '*.pdf' -o -iname '*.djvu' -o -iname '*.djv' \) -print0 | sort -z
+    find "$input_root" \
+      \( -type d \( -iname 'translated_output' -o -iname 'translate' -o -iname 'render' -o -iname 'ocr' \) -prune \) \
+      -o \
+      \( -type f \( -iname '*.pdf' -o -iname '*.djvu' -o -iname '*.djv' -o -iname '*.epub' \) -print0 \) | sort -z
   )
 else
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -136,16 +171,33 @@ else
     fi
 
     if [[ "$line" = /* ]]; then
-      input_files+=("$(realpath -m "$line")")
+      resolved_path=$(realpath -m "$line")
     else
-      input_files+=("$(realpath -m "$input_root/$line")")
+      resolved_path=$(realpath -m "$input_root/$line")
     fi
+
+    if is_translated_input "$resolved_path"; then
+      continue
+    fi
+
+    input_files+=("$resolved_path")
   done < "$list_file"
+fi
+
+if [[ "$input_mode" == "directory" ]]; then
+  filtered_files=()
+  for input_path in "${input_files[@]}"; do
+    if is_translated_input "$input_path"; then
+      continue
+    fi
+    filtered_files+=("$input_path")
+  done
+  input_files=("${filtered_files[@]}")
 fi
 
 if [[ ${#input_files[@]} -eq 0 ]]; then
   if [[ "$input_mode" == "directory" ]]; then
-    echo "No PDF or DjVu files found under: $input_root" >&2
+    echo "No PDF, DjVu, or EPUB files found under: $input_root" >&2
   else
     echo "No input files found in list: $list_file" >&2
   fi
@@ -185,10 +237,50 @@ for input_path in "${input_files[@]}"; do
   echo "    rel_no_ext: $rel_no_ext"
   echo "    Output dir:  $file_output_dir"
 
+  input_ext=${input_path##*.}
+  input_ext=${input_ext,,}
+
+  if [[ "$input_ext" == "epub" ]]; then
+    interleaved_output="$file_output_dir/$(basename "${rel_no_ext}")_interleaved.epub"
+    cn_output="$file_output_dir/$(basename "${rel_no_ext}")_cn.epub"
+
+    echo "    Translator:  epub_translate.py"
+    echo "    Output file: $interleaved_output"
+
+    if epub_outputs_exist "$interleaved_output" "$cn_output"; then
+      echo "    Skipped: existing EPUB output detected"
+      success_count=$((success_count + 1))
+      continue
+    fi
+
+    if ./.venv/bin/python src/translate/epub_translate.py \
+      --input "$input_path" \
+      --output "$interleaved_output" \
+      --output-cn "$cn_output" \
+      "${shared_translation_args[@]}" \
+      "${epub_default_args[@]}" \
+      "${extra_args[@]}"; then
+      success_count=$((success_count + 1))
+    else
+      failure_count=$((failure_count + 1))
+      echo "Translation failed: $input_path" >&2
+    fi
+    continue
+  fi
+
+  echo "    Translator:  pdf_translate.py"
+
+  if pdf_outputs_exist "$file_output_dir"; then
+    echo "    Skipped: existing PDF output detected"
+    success_count=$((success_count + 1))
+    continue
+  fi
+
   if ./.venv/bin/python src/translate/pdf_translate.py \
     --input "$input_path" \
     --output-dir "$file_output_dir" \
-    "${default_args[@]}" \
+    "${shared_translation_args[@]}" \
+    "${pdf_default_args[@]}" \
     "${extra_args[@]}"; then
     success_count=$((success_count + 1))
   else

@@ -360,6 +360,56 @@ class TranslationServiceTest(unittest.TestCase):
         self.assertNotIn("[FORMULA_1]", sent_messages[-1]["content"])
         self.assertEqual(result, "在说明中使用 $E=mc^2$。")
 
+    def test_translate_with_retry_skips_latex_placeholder_protection_for_html_mode(self) -> None:
+        source = "<p>Use $E=mc^2$ in the note.</p>"
+
+        with patch(
+            "translate_service.create_chat_completion_with_retry",
+            return_value="<p>在说明中使用 $E=mc^2$。</p>",
+        ) as mocked_create, patch.object(
+            self.service,
+            "_protect_latex",
+            side_effect=AssertionError("html mode should not protect latex"),
+        ), patch.object(
+            self.service,
+            "_repair_translation_latex",
+            side_effect=AssertionError("html mode should not repair latex"),
+        ):
+            result = self.service._translate_with_retry(
+                source,
+                self.service._build_messages(source, mode="html"),
+                mode="html",
+            )
+
+        sent_messages = mocked_create.call_args.kwargs["messages"]
+        self.assertEqual(sent_messages[-1]["content"], source)
+        self.assertEqual(result, "<p>在说明中使用 $E=mc^2$。</p>")
+
+    def test_translate_with_retry_skips_latex_placeholder_protection_for_plain_text_mode(self) -> None:
+        source = "Use $E=mc^2$ in the note."
+
+        with patch(
+            "translate_service.create_chat_completion_with_retry",
+            return_value="在说明中使用 $E=mc^2$。",
+        ) as mocked_create, patch.object(
+            self.service,
+            "_protect_latex",
+            side_effect=AssertionError("plain_text mode should not protect latex"),
+        ), patch.object(
+            self.service,
+            "_repair_translation_latex",
+            side_effect=AssertionError("plain_text mode should not repair latex"),
+        ):
+            result = self.service._translate_with_retry(
+                source,
+                self.service._build_messages(source, mode="plain_text"),
+                mode="plain_text",
+            )
+
+        sent_messages = mocked_create.call_args.kwargs["messages"]
+        self.assertEqual(sent_messages[-1]["content"], source)
+        self.assertEqual(result, "在说明中使用 $E=mc^2$。")
+
     def test_translate_with_retry_requests_reasoning_none_for_openai_compatible(self) -> None:
         source = "First paragraph."
 
@@ -438,7 +488,7 @@ class TranslationServiceTest(unittest.TestCase):
         with patch.object(
             service,
             "_translate_with_retry",
-            side_effect=lambda source_text, messages: f"ZH::{source_text}",
+            side_effect=lambda source_text, messages, mode="markdown": f"ZH::{source_text}",
         ) as mocked_translate:
             result = service.translate_text_block(text)
 
@@ -496,7 +546,7 @@ class TranslationServiceTest(unittest.TestCase):
         with patch.object(
             service,
             "_translate_with_retry",
-            side_effect=lambda source_text, messages: f"ZH::{source_text}",
+            side_effect=lambda source_text, messages, mode="markdown": f"ZH::{source_text}",
         ) as mocked_translate:
             result = service.translate_text_block(text)
 
@@ -602,7 +652,7 @@ class TranslationServiceTest(unittest.TestCase):
         with patch.object(
             service,
             "_translate_with_retry",
-            side_effect=lambda source_text, messages: f"ZH::{source_text}",
+            side_effect=lambda source_text, messages, mode="markdown": f"ZH::{source_text}",
         ) as mocked_translate, patch.object(
             annotation_service,
             "annotate",
@@ -640,7 +690,7 @@ class TranslationServiceTest(unittest.TestCase):
         with patch.object(
             service,
             "_translate_with_retry",
-            side_effect=lambda source_text, messages: f"ZH::{source_text}",
+            side_effect=lambda source_text, messages, mode="markdown": f"ZH::{source_text}",
         ) as mocked_translate, patch.object(
             annotation_service,
             "annotate",
