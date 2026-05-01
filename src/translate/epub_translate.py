@@ -9,6 +9,7 @@ import os
 import sys
 import itertools
 import io
+import re
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -142,18 +143,33 @@ def extract_translatable_segments(
     Collect textual blocks that should be translated from a soup document.
     """
     segments: List[HtmlSegment] = []
-    tag_names: Tuple[str, ...] = tuple(block_tags)
-    for tag in soup.find_all(tag_names):
-        if tag.find_parent(tag_names):
-            continue
+    top_level_blocks = _iter_top_level_blocks(soup, block_tags)
+    index = 0
+    while index < len(top_level_blocks):
+        tag = top_level_blocks[index]
         classes = tag.get("class") or []
         if translation_class and translation_class in classes:
+            index += 1
             continue
         text = tag.get_text(" ", strip=True)
         if not text:
+            index += 1
             continue
         if _should_remove_block(text):
             tag.decompose()
+            index += 1
+            continue
+        if _is_code_fence_paragraph(tag):
+            # EPUB generators often flatten fenced code blocks into many sibling <p>
+            # nodes. If we translate those paragraphs independently, the model will
+            # corrupt the code, so we skip the full fenced run here.
+            index = _skip_code_fence_run(top_level_blocks, index)
+            continue
+        if _looks_like_code_block_start(top_level_blocks, index):
+            # Some EPUBs do not preserve <pre><code>; instead they emit contiguous
+            # code-looking <p> tags. Treat that run as a protected block and leave it
+            # untouched rather than sending each line to translation.
+            index = _skip_code_like_run(top_level_blocks, index)
             continue
         segments.append(
             HtmlSegment(
@@ -163,8 +179,100 @@ def extract_translatable_segments(
                 raw_html=str(tag),
             )
         )
+        index += 1
     return segments
 
+
+def _iter_top_level_blocks(soup: BeautifulSoup, block_tags: Sequence[str]) -> List[Tag]:
+    tag_names: Tuple[str, ...] = tuple(block_tags)
+    root = soup.body or soup
+    blocks: List[Tag] = []
+    for tag in root.find_all(tag_names):
+        if tag.find_parent(tag_names):
+            continue
+        blocks.append(tag)
+    return blocks
+
+
+def _tag_text(tag: Tag) -> str:
+    return tag.get_text(" ", strip=True).replace("\xa0", " ")
+
+
+def _is_code_fence_paragraph(tag: Tag) -> bool:
+    if tag.name != "p":
+        return False
+    return bool(re.match(r"^```[A-Za-z0-9_+-]*\s*$", _tag_text(tag)))
+
+
+def _skip_code_fence_run(blocks: Sequence[Tag], start_index: int) -> int:
+    index = start_index + 1
+    while index < len(blocks):
+        if _is_code_fence_paragraph(blocks[index]):
+            return index + 1
+        index += 1
+    return index
+
+
+def _looks_like_code_block_start(blocks: Sequence[Tag], start_index: int) -> bool:
+    if not _looks_like_code_paragraph(blocks[start_index]):
+        return False
+    if start_index + 1 >= len(blocks):
+        return False
+    return _looks_like_code_paragraph(blocks[start_index + 1])
+
+
+def _skip_code_like_run(blocks: Sequence[Tag], start_index: int) -> int:
+    index = start_index + 1
+    while index < len(blocks) and _looks_like_code_paragraph(blocks[index]):
+        index += 1
+    return index
+
+
+def _looks_like_code_paragraph(tag: Tag) -> bool:
+    if tag.name != "p":
+        return False
+    text = _tag_text(tag)
+    if not text:
+        return False
+
+    stripped = text.strip()
+    if stripped in {"```", "'''"}:
+        return True
+
+    code_prefixes = (
+        "import ",
+        "from ",
+        "def ",
+        "class ",
+        "return ",
+        "if ",
+        "elif ",
+        "else:",
+        "for ",
+        "while ",
+        "try:",
+        "except ",
+        "with ",
+        "print(",
+        "@",
+    )
+    if stripped.startswith(code_prefixes):
+        return True
+
+    if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*=\s*.+$", stripped):
+        return True
+    if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\(.+\)$", stripped):
+        return True
+
+    words = stripped.split()
+    if len(words) >= 4 and not any(ch in stripped for ch in ("(", ")", "=", "[", "]", "{", "}")):
+        return False
+
+    punctuation_hits = sum(1 for token in ("(", ")", "[", "]", "{", "}", "=", ":", "._", "->") if token in stripped)
+    if punctuation_hits >= 3 and " " not in stripped[:12]:
+        return True
+
+    return False
 
 def apply_translations(
     segments: Sequence[HtmlSegment],

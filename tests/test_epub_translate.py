@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 
 from ebooklib import epub
+from bs4 import BeautifulSoup
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -12,7 +13,7 @@ TRANSLATE_SRC = PROJECT_ROOT / "src" / "translate"
 if str(TRANSLATE_SRC) not in sys.path:
     sys.path.insert(0, str(TRANSLATE_SRC))
 
-from epub_translate import write_epub_preserving_raw_html  # noqa: E402
+from epub_translate import extract_translatable_segments, write_epub_preserving_raw_html  # noqa: E402
 
 
 class EpubTranslateWriteTest(unittest.TestCase):
@@ -44,6 +45,47 @@ class EpubTranslateWriteTest(unittest.TestCase):
 
             self.assertNotIn('href="stylesheet.css"', default_xhtml)
             self.assertIn('href="stylesheet.css"', preserved_xhtml)
+
+    def test_extract_translatable_segments_skips_fenced_code_paragraph_runs(self) -> None:
+        html = """
+        <html><body>
+        <p>Intro paragraph.</p>
+        <p>```python</p>
+        <p>import numpy as np</p>
+        <p>print("hello")</p>
+        <p>```</p>
+        <p>Closing paragraph.</p>
+        </body></html>
+        """
+
+        soup = BeautifulSoup(html, "html.parser")
+        segments = extract_translatable_segments(soup)
+
+        self.assertEqual([segment.text for segment in segments], ["Intro paragraph.", "Closing paragraph."])
+
+    def test_extract_translatable_segments_skips_code_like_paragraph_runs(self) -> None:
+        html = """
+        <html><body>
+        <p class="class_s8">To illustrate, consider the following Python code snippet:</p>
+        <p class="class_sY">import numpy as np</p>
+        <p class="class_sY">from scipy.stats import norm</p>
+        <p class="class_s8"># Black-Scholes model for calculating delta and gamma</p>
+        <p class="class_sY">def black_scholes_gamma(S, K, T, r, sigma):</p>
+        <p class="class_sY">return norm.pdf(d1) / (S * sigma * np.sqrt(T))</p>
+        <p class="class_s8">This paragraph should still be translated.</p>
+        </body></html>
+        """
+
+        soup = BeautifulSoup(html, "html.parser")
+        segments = extract_translatable_segments(soup)
+
+        self.assertEqual(
+            [segment.text for segment in segments],
+            [
+                "To illustrate, consider the following Python code snippet:",
+                "This paragraph should still be translated.",
+            ],
+        )
 
     def _build_book_with_raw_xhtml(self, raw_xhtml: bytes) -> epub.EpubBook:
         book = epub.EpubBook()
