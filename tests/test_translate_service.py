@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from io import StringIO
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TRANSLATE_SRC = PROJECT_ROOT / "src" / "translate"
@@ -15,8 +16,14 @@ from translate_service import (  # noqa: E402
     DEFAULT_HTML_TRANSLATION_SYSTEM_PROMPT,
     DEFAULT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT,
     DEFAULT_PLAIN_TEXT_TRANSLATION_SYSTEM_PROMPT,
+    GenericChatTranslator,
     TranslationService,
+    TranslateGemmaTranslationService,
+    TranslateGemmaTranslator,
+    init_annotation_service,
+    init_translator,
     init_translation_service,
+    validate_translation_args,
 )
 from annotation import AnnotationService  # noqa: E402
 from annotation import PAGE_ANNOTATION_SYSTEM_PROMPT  # noqa: E402
@@ -115,6 +122,14 @@ class TranslationServiceTest(unittest.TestCase):
 
         self.assertTrue(self.service._looks_suspicious_translation(source, translation))
 
+    def test_get_suspicious_translation_reason_reports_repetition(self) -> None:
+        source = "This is a sufficiently long source text for the heuristic to inspect repeated output." * 2
+        translation = "word " * 20
+
+        reason = self.service._get_suspicious_translation_reason(source, translation)
+
+        self.assertEqual(reason, "low diversity or repeated content")
+
     def test_looks_suspicious_allows_untranslated_bibliography_entry(self) -> None:
         source = (
             "[145] WEIL, A.: L'integration dans les groupes topologiques et ses applications. "
@@ -212,6 +227,34 @@ class TranslationServiceTest(unittest.TestCase):
 
         self.assertEqual(messages[0]["content"], DEFAULT_PLAIN_TEXT_TRANSLATION_SYSTEM_PROMPT)
         self.assertIn("Translate the following text into Simplified Chinese.", messages[-1]["content"])
+
+    def test_translategemma_build_messages_use_tagged_single_user_message(self) -> None:
+        service = TranslateGemmaTranslator(
+            client=None,
+            model="translategemma-12b-it",
+            temperature=0.2,
+            source_lang="en",
+            target_lang="zh",
+        )
+
+        messages = service._build_messages("Hello", mode="plain_text")
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "user")
+        self.assertIn("<<<source>>>en<<<target>>>zh<<<text>>>", messages[0]["content"])
+        self.assertIn("Translate the following text into natural, fluent Simplified Chinese.", messages[0]["content"])
+
+    def test_translategemma_build_messages_wrap_html_with_preservation_instruction(self) -> None:
+        service = TranslateGemmaTranslator(
+            client=None,
+            model="translategemma-12b-it",
+            temperature=0.2,
+        )
+
+        messages = service._build_messages("<p>Hello</p>", mode="html")
+
+        self.assertIn("Preserve all HTML tags, attributes, URLs, and LaTeX formulas exactly.", messages[0]["content"])
+        self.assertTrue(messages[0]["content"].endswith("<p>Hello</p>"))
 
     def test_translate_with_retry_preserves_short_input_wrapper_when_replacing_user_message(self) -> None:
         source = "or"
@@ -443,6 +486,23 @@ class TranslationServiceTest(unittest.TestCase):
             )
 
         self.assertEqual(result, "在说明中使用 $E=mc^2$。")
+
+    def test_translate_with_retry_logs_suspicious_reason(self) -> None:
+        source = "This is a sufficiently long source text for the heuristic to inspect repeated output." * 2
+        log_stream = StringIO()
+        service = TranslationService(client=None, model="fake-model", temperature=0.2)
+
+        with patch(
+            "translate_service.create_chat_completion_with_retry",
+            side_effect=["word " * 20, "有效译文"],
+        ) as mocked_create, patch("sys.stderr", log_stream):
+            result = service._translate_with_retry(
+                source,
+                service._build_messages(source),
+            )
+
+        self.assertEqual(result, "有效译文")
+        self.assertIn("reason: low diversity or repeated content", log_stream.getvalue())
         self.assertEqual(mocked_create.call_count, 2)
 
     def test_translate_with_retry_returns_last_failed_latex_result_after_max_retries(self) -> None:
@@ -752,7 +812,7 @@ class TranslationServiceTest(unittest.TestCase):
         mocked_translate.assert_called_once()
         self.assertEqual(mocked_translate.call_args.args[0], text)
 
-    def test_init_translation_service_uses_selected_provider(self) -> None:
+    def test_init_translator_uses_selected_provider(self) -> None:
         args = SimpleNamespace(
             translation_base_url="http://translate/v1",
             translation_api_key="translate-key",
@@ -770,7 +830,7 @@ class TranslationServiceTest(unittest.TestCase):
         )
 
         with patch("translate_service.configure_openai", return_value="codex-client") as mocked_configure:
-            service = init_translation_service(args)
+            service = init_translator(args)
 
         mocked_configure.assert_called_once_with(
             base_url="http://translate/v1",
@@ -779,8 +839,41 @@ class TranslationServiceTest(unittest.TestCase):
         self.assertEqual(service.client, "codex-client")
         self.assertEqual(service.reasoning_effort, "none")
         self.assertEqual(service.scope, "block")
+        self.assertIsInstance(service, GenericChatTranslator)
+        self.assertFalse(hasattr(service, "annotator"))
 
-    def test_init_translation_service_builds_annotation_service_with_own_backend(self) -> None:
+    def test_init_translator_builds_translategemma_translator(self) -> None:
+        args = SimpleNamespace(
+            translation_base_url="http://translate/v1",
+            translation_api_key="translate-key",
+            translation_model="translategemma-12b-it",
+            translation_profile="translategemma",
+            translation_source_lang="en",
+            translation_target_lang="zh",
+            translation_reasoning_effort="none",
+            translation_temperature=0.2,
+            translation_max_chunk_chars=1200,
+            translation_scope="block",
+            translation_latex_formula_handling="placeholder",
+            document_type=None,
+            do_latex_repair=None,
+            annotation_mode="none",
+            annotation_base_url=None,
+            annotation_api_key=None,
+            annotation_model=None,
+            annotation_reasoning_effort=None,
+        )
+
+        with patch("translate_service.configure_openai", return_value="codex-client"):
+            service = init_translator(args)
+
+        self.assertIsInstance(service, TranslateGemmaTranslator)
+        self.assertEqual(service.source_lang, "en")
+        self.assertEqual(service.target_lang, "zh")
+        self.assertEqual(service.document_type, "general")
+        self.assertFalse(service._do_latex_repair)
+
+    def test_init_annotation_service_builds_service_with_own_backend(self) -> None:
         args = SimpleNamespace(
             translation_base_url="http://translate/v1",
             translation_api_key="translate-key",
@@ -799,17 +892,19 @@ class TranslationServiceTest(unittest.TestCase):
 
         with patch(
             "translate_service.configure_openai",
-            side_effect=["annotation-client", "translation-client"],
+            return_value="annotation-client",
         ) as mocked_configure:
-            service = init_translation_service(args)
+            annotation_service = init_annotation_service(args)
 
-        self.assertEqual(mocked_configure.call_count, 2)
-        self.assertEqual(service.client, "translation-client")
-        self.assertIsNotNone(service._annotation_service)
-        self.assertEqual(service._annotation_service.client, "annotation-client")
-        self.assertEqual(service._annotation_service.model, "gpt-4o-mini")
-        self.assertEqual(service._annotation_service.reasoning_effort, "medium")
-        self.assertEqual(service._annotation_service.mode, "item")
+        mocked_configure.assert_called_once_with(
+            base_url="http://annotation/v1",
+            api_key="annotation-key",
+        )
+        self.assertIsNotNone(annotation_service)
+        self.assertEqual(annotation_service.client, "annotation-client")
+        self.assertEqual(annotation_service.model, "gpt-4o-mini")
+        self.assertEqual(annotation_service.reasoning_effort, "medium")
+        self.assertEqual(annotation_service.mode, "item")
 
     def test_init_translation_service_annotation_defaults_to_translation_backend(self) -> None:
         args = SimpleNamespace(
@@ -830,7 +925,7 @@ class TranslationServiceTest(unittest.TestCase):
 
         with patch(
             "translate_service.configure_openai",
-            side_effect=["annotation-client", "translation-client"],
+            side_effect=["translation-client", "annotation-client"],
         ) as mocked_configure:
             service = init_translation_service(args)
 
@@ -842,10 +937,92 @@ class TranslationServiceTest(unittest.TestCase):
                 "api_key": "translate-key",
             },
         )
-        self.assertIsNotNone(service._annotation_service)
-        self.assertEqual(service._annotation_service.model, "gemma4:26b")
-        self.assertEqual(service._annotation_service.mode, "page")
+        self.assertEqual(
+            mocked_configure.call_args_list[1].kwargs,
+            {
+                "base_url": "http://translate/v1",
+                "api_key": "translate-key",
+            },
+        )
+        self.assertIsNotNone(service.annotator)
+        self.assertEqual(service.annotator.model, "gemma4:26b")
+        self.assertEqual(service.annotator.mode, "page")
         self.assertEqual(service.scope, "page")
+
+    def test_init_translation_service_attaches_annotation_service(self) -> None:
+        args = SimpleNamespace(
+            translation_base_url="http://translate/v1",
+            translation_api_key="translate-key",
+            translation_model="gemma4:26b",
+            translation_reasoning_effort="none",
+            translation_temperature=0.2,
+            translation_max_chunk_chars=1200,
+            translation_scope="block",
+            translation_latex_formula_handling="placeholder",
+            annotation_mode="item",
+            annotation_base_url="http://annotation/v1",
+            annotation_api_key="annotation-key",
+            annotation_model="gpt-4o-mini",
+            annotation_reasoning_effort="medium",
+        )
+
+        with patch(
+            "translate_service.configure_openai",
+            side_effect=["translation-client", "annotation-client"],
+        ):
+            service = init_translation_service(args)
+
+        self.assertEqual(service.client, "translation-client")
+        self.assertIsNotNone(service.annotator)
+        self.assertEqual(service.annotator.client, "annotation-client")
+        self.assertEqual(service.annotator.model, "gpt-4o-mini")
+
+    def test_init_translation_service_preserves_translategemma_profile(self) -> None:
+        args = SimpleNamespace(
+            translation_base_url="http://translate/v1",
+            translation_api_key="translate-key",
+            translation_model="translategemma-12b-it",
+            translation_profile="translategemma",
+            translation_source_lang="en",
+            translation_target_lang="zh",
+            translation_reasoning_effort="none",
+            translation_temperature=0.2,
+            translation_max_chunk_chars=1200,
+            translation_scope="block",
+            translation_latex_formula_handling="placeholder",
+            document_type=None,
+            do_latex_repair=None,
+            annotation_mode=None,
+            annotation_base_url=None,
+            annotation_api_key=None,
+            annotation_model=None,
+            annotation_reasoning_effort=None,
+        )
+
+        with patch("translate_service.configure_openai", return_value="translation-client"):
+            service = init_translation_service(args)
+
+        self.assertIsInstance(service, TranslateGemmaTranslationService)
+        self.assertEqual(service.source_lang, "en")
+        self.assertEqual(service.target_lang, "zh")
+        self.assertEqual(service.document_type, "general")
+        self.assertFalse(service._do_latex_repair)
+        self.assertIsNone(service.annotator)
+
+    def test_validate_translation_args_defaults_translategemma_to_general_and_no_annotation(self) -> None:
+        args = SimpleNamespace(
+            translation_profile="translategemma",
+            document_type=None,
+            annotation_mode=None,
+            do_latex_repair=None,
+            translation_scope="block",
+        )
+
+        validate_translation_args(args)
+
+        self.assertEqual(args.document_type, "general")
+        self.assertEqual(args.annotation_mode, "none")
+        self.assertFalse(args.do_latex_repair)
 
     def test_init_translation_service_rejects_item_annotation_with_page_scope(self) -> None:
         args = SimpleNamespace(

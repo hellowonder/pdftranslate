@@ -59,6 +59,9 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
         self.assertTrue(args.generate_interleave_pdf)
         self.assertFalse(args.generate_translation_only_pdf)
         self.assertEqual(args.translation_base_url, "http://localhost:11434/v1")
+        self.assertEqual(args.translation_profile, "generic")
+        self.assertEqual(args.document_type, "academic")
+        self.assertEqual(args.annotation_mode, "page")
         self.assertEqual(args.translation_reasoning_effort, "none")
 
     def test_parse_args_accepts_translation_only_pdf_output(self) -> None:
@@ -136,6 +139,31 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
             args = parse_args()
 
         self.assertEqual(args.translation_scope, "page")
+
+    def test_parse_args_accepts_translategemma_profile(self) -> None:
+        argv = [
+            "pdf_translate.py",
+            "--input",
+            "tests/data/one_page.pdf",
+            "--output-dir",
+            "tests/data/output",
+            "--translation-profile",
+            "translategemma",
+            "--translation-source-lang",
+            "en",
+            "--translation-target-lang",
+            "zh",
+        ]
+
+        with patch.object(sys, "argv", argv):
+            args = parse_args()
+
+        self.assertEqual(args.translation_profile, "translategemma")
+        self.assertEqual(args.translation_source_lang, "en")
+        self.assertEqual(args.translation_target_lang, "zh")
+        self.assertEqual(args.document_type, "general")
+        self.assertEqual(args.annotation_mode, "none")
+        self.assertFalse(args.do_latex_repair)
 
     def test_parse_args_rejects_item_annotation_with_page_scope(self) -> None:
         argv = [

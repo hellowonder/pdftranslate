@@ -17,15 +17,17 @@ Description:
 
 Defaults passed to PDF/DjVu translation:
   --generate-interleave-pdf
-  --translation-model gemma4:26b
-  --translation-base-url http://192.168.3.105:11434/v1
+  --translation-model translategemma-4b-it
+  --translation-profile translategemma
+  --translation-base-url http://localhost:8001/v1
   --ocr-base-url http://localhost:8000/v1
   --ocr-model chandra
   --translation-latex-formula-handling direct
 
 Defaults passed to EPUB translation:
-  --translation-model gemma4:26b
-  --translation-base-url http://192.168.3.105:11434/v1
+  --translation-model translategemma-4b-it
+  --translation-profile translategemma
+  --translation-base-url http://localhost:8001/v1
 
 Output layout:
   Each source file gets its own output directory under [output-root].
@@ -105,8 +107,9 @@ mkdir -p "$output_root"
 
 shared_translation_args=(
   --translation-workers 32
-  --translation-base-url http://192.168.3.105:11434/v1
-  --translation-model gemma4:26b
+  --translation-base-url http://localhost:8001/v1
+  --translation-model translategemma-4b-it
+  --translation-profile translategemma
 )
 
 pdf_default_args=(

@@ -11,7 +11,7 @@ import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Iterator, List, Literal, Optional, Sequence, Tuple
+from typing import Any, Iterator, List, Literal, Optional, Protocol, Sequence, Tuple
 
 from tqdm import tqdm
 from llm_util import (
@@ -27,6 +27,7 @@ LatexFormulaHandlingMode = Literal["placeholder", "direct"]
 ReasoningEffort = Literal["none", "low", "medium", "high"]
 AnnotationMode = Literal["none", "item", "page"]
 TranslationScope = Literal["block", "page"]
+TranslationProfile = Literal["generic", "translategemma"]
 
 # For academic/technical documents with mathematical content
 DEFAULT_MARKDOWN_TRANSLATION_SYSTEM_PROMPT = (
@@ -221,8 +222,37 @@ class TranslationBlock:
     protected: bool
     is_annotation: bool = False
 
+
+class Translator(Protocol):
+    def translate_text_block(self, text: str, mode: TranslationMode = "markdown") -> str:
+        ...
+
+    def translate_pages(
+        self,
+        pages: Sequence[str],
+        max_workers: int = 1,
+        mode: TranslationMode = "markdown",
+    ) -> List[str]:
+        ...
+
+
+TRANSLATEGEMMA_MARKDOWN_INSTRUCTION = (
+    "Translate the following Markdown into natural, fluent Simplified Chinese. "
+    "Preserve all Markdown structure, code, and LaTeX formulas exactly. "
+    "Return only the translated Markdown.\n\n"
+)
+TRANSLATEGEMMA_HTML_INSTRUCTION = (
+    "Translate the following HTML into natural, fluent Simplified Chinese. "
+    "Preserve all HTML tags, attributes, URLs, and LaTeX formulas exactly. "
+    "Return only the translated HTML.\n\n"
+)
+TRANSLATEGEMMA_PLAIN_TEXT_INSTRUCTION = (
+    "Translate the following text into natural, fluent Simplified Chinese. "
+    "Return only the translation.\n\n"
+)
+
 @dataclass
-class TranslationService:
+class GenericChatTranslator:
     client: Any
     model: str
     temperature: float
@@ -231,7 +261,6 @@ class TranslationService:
     latex_formula_handling: LatexFormulaHandlingMode = "placeholder"
     reasoning_effort: ReasoningEffort = "none"
     document_type: Literal["academic", "general"] = "academic"
-    _annotation_service: Optional[AnnotationService] = None
     _do_latex_repair: bool = True
 
     _SHORT_TRANSLATION_USER_CONTENT_MAX_CHARS = 20
@@ -383,9 +412,11 @@ class TranslationService:
                 max_retries=1,
                 error_label="translate",
             )
-            if self._looks_suspicious_translation(request_text, result):
+            suspicious_reason = self._get_suspicious_translation_reason(request_text, result)
+            if suspicious_reason is not None:
                 print(
-                    f"suspicious translation output (attempt {attempt}/{max_retries}); retrying...\n",
+                    f"suspicious translation output (attempt {attempt}/{max_retries}); "
+                    f"reason: {suspicious_reason}; retrying...\n",
                     f"from: {request_text!r}\n",
                     f">>: {result!r}\n",
                     file=sys.stderr,
@@ -560,28 +591,16 @@ class TranslationService:
         return self._translate_block_text(text, mode=mode)
 
     def _translate_page_text(self, text: str, mode: TranslationMode = "markdown") -> str:
-        translated = self._translate_with_retry(
+        return self._translate_with_retry(
             text,
             self._build_messages(text, mode=mode),
             mode=mode,
         )
-        if self._annotation_service and self._annotation_service.mode == "page":
-            annotation = self._annotation_service.annotate(text)
-            if annotation:
-                return f"{translated}{annotation}"
-        return translated
 
     def _translate_block_text(self, text: str, mode: TranslationMode = "markdown") -> str:
         output_parts: List[str] = []
         for block in self._iter_translation_blocks(text):
             if not block.text:
-                continue
-            if block.is_annotation:
-                if not self._annotation_service:
-                    continue
-                annotation = self._annotation_service.annotate(block.text)
-                if annotation:
-                    output_parts.append(annotation)
                 continue
             if block.protected:
                 output_parts.append(block.text)
@@ -593,12 +612,35 @@ class TranslationService:
                     mode=mode,
                 )
             )
-        translated = "".join(output_parts)
-        if self._annotation_service and self._annotation_service.mode == "page":
-            annotation = self._annotation_service.annotate(text)
-            if annotation:
-                return f"{translated}{annotation}"
-        return translated
+        return "".join(output_parts)
+
+    def _get_suspicious_translation_reason(self, source: str, translation: str) -> Optional[str]:
+        """
+        返回译文可疑的原因；若结果看起来可接受，则返回 ``None``。
+
+        参数:
+            source: 原文文本。
+            translation: 模型返回的译文文本。
+        返回:
+            Optional[str]: 可疑原因字符串，或 ``None``。
+        """
+        if not translation.strip():
+            return "empty output"
+
+        max_reasonable_len = len(source) * 6
+        if len(translation) > max_reasonable_len:
+            return f"output too long ({len(translation)} > {max_reasonable_len})"
+
+        if has_low_diversity_or_repetition(translation):
+            return "low diversity or repeated content"
+
+        if max(len(source), len(translation)) < 100:
+            return None
+
+        # if self._looks_untranslated(source, translation):
+        #     return "looks untranslated"
+
+        return None
 
     def _looks_suspicious_translation(self, source: str, translation: str) -> bool:
         """
@@ -610,23 +652,7 @@ class TranslationService:
         返回:
             bool: 如果结果为空、过长、重复严重或疑似未翻译，则返回 ``True``。
         """
-        if not translation.strip():
-            return True
-
-        max_reasonable_len = len(source) * 6
-        if len(translation) > max_reasonable_len:
-            return True
-
-        if has_low_diversity_or_repetition(translation):
-            return True
-
-        if max(len(source), len(translation)) < 100:
-            return False
-
-        # if self._looks_untranslated(source, translation):
-        #     return True
-
-        return False
+        return self._get_suspicious_translation_reason(source, translation) is not None
 
     def _looks_untranslated(self, source: str, translation: str) -> bool:
         """
@@ -759,47 +785,12 @@ class TranslationService:
         返回:
             Iterator[TranslationBlock]: 按输出顺序生成的块序列。
         """
-        raw_blocks = list(self._iter_base_markdown_blocks(text))
-        if not raw_blocks:
-            yield TranslationBlock(text=text, protected=False)
-            return
-
-        annotation_service = self._annotation_service
-        annotation_parts: List[str] = []
-        annotation_active = False
-
-        for index, block in enumerate(raw_blocks):
+        for block in self._iter_base_markdown_blocks(text):
             if block.protected or len(block.text) <= self.max_chunk_chars:
                 yield block
             else:
                 yield from self._iter_plain_translation_chunks(block.text)
 
-            if not annotation_service or annotation_service.mode != "item":
-                continue
-
-            should_extend = annotation_service._should_annotate(
-                "".join(annotation_parts) if annotation_active else None,
-                block.text,
-            )
-            if should_extend:
-                annotation_parts.append(block.text)
-                annotation_active = True
-
-            next_block = raw_blocks[index + 1] if index + 1 < len(raw_blocks) else None
-            if (
-                annotation_active
-                and (
-                    next_block is None
-                    or not annotation_service._should_annotate("".join(annotation_parts), next_block.text)
-                )
-            ):
-                yield TranslationBlock(
-                    text="".join(annotation_parts),
-                    protected=False,
-                    is_annotation=True,
-                )
-                annotation_parts = []
-                annotation_active = False
 
     def _iter_base_markdown_blocks(self, text: str) -> Iterator[TranslationBlock]:
         """
@@ -1004,6 +995,203 @@ class TranslationService:
         return results
 
 
+@dataclass
+class TranslateGemmaTranslator(GenericChatTranslator):
+    source_lang: str = "en"
+    target_lang: str = "zh"
+
+    def _build_messages(
+        self,
+        user_content: str,
+        mode: TranslationMode = "markdown",
+    ) -> List[dict[str, str]]:
+        return [
+            {
+                "role": "user",
+                "content": self._format_translategemma_request(user_content, mode),
+            }
+        ]
+
+    def _replace_last_user_message(
+        self,
+        messages: Sequence[dict[str, str]],
+        user_content: str,
+    ) -> List[dict[str, str]]:
+        del messages
+        return self._build_messages(user_content, mode="markdown")
+
+    def _translate_with_retry(
+        self,
+        source_text: str,
+        messages: Sequence[dict[str, str]],
+        mode: TranslationMode = "markdown",
+    ) -> str:
+        leading, core_text, trailing = self._split_outer_whitespace(source_text)
+        if not core_text:
+            return source_text
+        if not self._need_translate(core_text):
+            return source_text
+
+        should_handle_latex = self._should_handle_latex(mode)
+        if should_handle_latex and self.latex_formula_handling == "placeholder":
+            request_text, formula_map = self._protect_latex(core_text)
+        else:
+            request_text, formula_map = core_text, []
+        request_messages = self._build_messages(request_text, mode=mode)
+        max_retries = 3
+        content = ""
+        for attempt in range(1, max_retries + 1):
+            result = create_chat_completion_with_retry(
+                client=self.client,
+                model=self.model,
+                messages=request_messages,
+                reasoning_effort=self.reasoning_effort,
+                max_retries=1,
+                error_label="translate",
+            )
+            suspicious_reason = self._get_suspicious_translation_reason(request_text, result)
+            if suspicious_reason is not None:
+                print(
+                    f"suspicious translation output (attempt {attempt}/{max_retries}); "
+                    f"reason: {suspicious_reason}; retrying...\n",
+                    f"from: {request_text!r}\n",
+                    f">>: {result!r}\n",
+                    file=sys.stderr,
+                )
+                continue
+            content = result
+            break
+
+        if not content.strip():
+            return source_text
+
+        if should_handle_latex and self.latex_formula_handling == "placeholder":
+            content, latex_ok = self._restore_latex(content, formula_map)
+        elif should_handle_latex:
+            content, latex_ok = self._repair_translation_latex(core_text, content)
+        else:
+            latex_ok = True
+        del latex_ok
+        return self._restore_outer_whitespace(leading, trailing, content)
+
+    def _format_translategemma_request(self, user_content: str, mode: TranslationMode) -> str:
+        if mode == "html":
+            instruction = TRANSLATEGEMMA_HTML_INSTRUCTION
+        elif mode == "plain_text":
+            instruction = TRANSLATEGEMMA_PLAIN_TEXT_INSTRUCTION
+        else:
+            instruction = TRANSLATEGEMMA_MARKDOWN_INSTRUCTION
+        return (
+            f"<<<source>>>{self.source_lang}"
+            f"<<<target>>>{self.target_lang}"
+            f"<<<text>>>{instruction}{user_content}"
+        )
+
+class AnnotationOrchestrationMixin:
+    _annotation_service: Optional[AnnotationService]
+
+    @property
+    def annotator(self) -> Optional[AnnotationService]:
+        return self._annotation_service
+
+    @annotator.setter
+    def annotator(self, value: Optional[AnnotationService]) -> None:
+        self._annotation_service = value
+
+    def attach_annotator(self, annotator: Optional[AnnotationService]) -> None:
+        self._annotation_service = annotator
+
+    def _translate_page_text(self, text: str, mode: TranslationMode = "markdown") -> str:
+        translated = super()._translate_page_text(text, mode=mode)
+        if self.annotator and self.annotator.mode == "page":
+            annotation = self.annotator.annotate(text)
+            if annotation:
+                return f"{translated}{annotation}"
+        return translated
+
+    def _translate_block_text(self, text: str, mode: TranslationMode = "markdown") -> str:
+        output_parts: List[str] = []
+        for block in self._iter_translation_blocks(text):
+            if not block.text:
+                continue
+            if block.is_annotation:
+                if not self.annotator:
+                    continue
+                annotation = self.annotator.annotate(block.text)
+                if annotation:
+                    output_parts.append(annotation)
+                continue
+            if block.protected:
+                output_parts.append(block.text)
+                continue
+            output_parts.append(
+                self._translate_with_retry(
+                    block.text,
+                    self._build_messages(block.text, mode=mode),
+                    mode=mode,
+                )
+            )
+        translated = "".join(output_parts)
+        if self.annotator and self.annotator.mode == "page":
+            annotation = self.annotator.annotate(text)
+            if annotation:
+                return f"{translated}{annotation}"
+        return translated
+
+    def _iter_translation_blocks(self, text: str) -> Iterator[TranslationBlock]:
+        raw_blocks = list(self._iter_base_markdown_blocks(text))
+        if not raw_blocks:
+            yield TranslationBlock(text=text, protected=False)
+            return
+
+        annotation_service = self.annotator
+        annotation_parts: List[str] = []
+        annotation_active = False
+
+        for index, block in enumerate(raw_blocks):
+            if block.protected or len(block.text) <= self.max_chunk_chars:
+                yield block
+            else:
+                yield from self._iter_plain_translation_chunks(block.text)
+
+            if not annotation_service or annotation_service.mode != "item":
+                continue
+
+            should_extend = annotation_service._should_annotate(
+                "".join(annotation_parts) if annotation_active else None,
+                block.text,
+            )
+            if should_extend:
+                annotation_parts.append(block.text)
+                annotation_active = True
+
+            next_block = raw_blocks[index + 1] if index + 1 < len(raw_blocks) else None
+            if (
+                annotation_active
+                and (
+                    next_block is None
+                    or not annotation_service._should_annotate("".join(annotation_parts), next_block.text)
+                )
+            ):
+                yield TranslationBlock(
+                    text="".join(annotation_parts),
+                    protected=False,
+                    is_annotation=True,
+                )
+                annotation_parts = []
+                annotation_active = False
+
+
+@dataclass
+class TranslationService(AnnotationOrchestrationMixin, GenericChatTranslator):
+    _annotation_service: Optional[AnnotationService] = None
+
+
+@dataclass
+class TranslateGemmaTranslationService(AnnotationOrchestrationMixin, TranslateGemmaTranslator):
+    _annotation_service: Optional[AnnotationService] = None
+
+
 def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
     """
     为命令行解析器注册翻译相关的公共参数。
@@ -1027,6 +1215,22 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
         "--translation-model",
         default="gemma4:26b",
         help="Model name exposed by the translation endpoint. Defaults to the local Ollama model gemma4:26b.",
+    )
+    parser.add_argument(
+        "--translation-profile",
+        choices=["generic", "translategemma"],
+        default="generic",
+        help="Translator prompt/profile to use for the translation backend.",
+    )
+    parser.add_argument(
+        "--translation-source-lang",
+        default="en",
+        help="Source language code used by translator profiles that require explicit language tags.",
+    )
+    parser.add_argument(
+        "--translation-target-lang",
+        default="zh",
+        help="Target language code used by translator profiles that require explicit language tags.",
     )
     parser.add_argument(
         "--translation-reasoning-effort",
@@ -1094,7 +1298,7 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--document-type",
         choices=["academic", "general"],
-        default="academic",
+        default=None,
         help=(
             "Document type: 'academic' for academic books/papers with mathematical content "
             "uses math-specific prompts and terminology; 'general' for novels, non-fiction and "
@@ -1118,11 +1322,19 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def validate_translation_args(args: argparse.Namespace) -> None:
-    # Set default annotation_mode based on document_type if not explicitly specified
+    profile: TranslationProfile = getattr(args, "translation_profile", "generic")
+
+    document_type = getattr(args, "document_type", None)
+    if document_type is None:
+        args.document_type = "general" if profile == "translategemma" else "academic"
     document_type = getattr(args, "document_type", "academic")
+
+    # Set default annotation_mode based on document_type if not explicitly specified
     annotation_mode = getattr(args, "annotation_mode", None)
     if annotation_mode is None:
-        if document_type == "academic":
+        if profile == "translategemma":
+            args.annotation_mode = "none"
+        elif document_type == "academic":
             # For academic documents with math, default to page-level annotations
             args.annotation_mode = "page"
         else:
@@ -1133,7 +1345,9 @@ def validate_translation_args(args: argparse.Namespace) -> None:
     # Set default do_latex_repair based on document_type if not explicitly specified
     do_latex_repair = getattr(args, "do_latex_repair", None)
     if do_latex_repair is None:
-        if document_type == "academic":
+        if profile == "translategemma":
+            args.do_latex_repair = False
+        elif document_type == "academic":
             args.do_latex_repair = True
         else:
             args.do_latex_repair = False
@@ -1154,6 +1368,69 @@ def _resolve_annotation_args(args: argparse.Namespace) -> tuple[str, str, str, s
     return base_url, api_key, model, reasoning_effort
 
 
+def init_translator(
+    args: argparse.Namespace,
+) -> GenericChatTranslator:
+    """
+    根据命令行参数创建纯翻译服务实例。
+
+    该实例只负责文本翻译，不装配 annotation backend，便于后续为翻译和通用
+    LLM 分别选择不同模型或不同提示协议。
+    """
+    validate_translation_args(args)
+    client = configure_openai(
+        base_url=args.translation_base_url,
+        api_key=args.translation_api_key,
+    )
+    common_kwargs = {
+        "client": client,
+        "model": args.translation_model,
+        "temperature": args.translation_temperature,
+        "max_chunk_chars": args.translation_max_chunk_chars,
+        "scope": getattr(args, "translation_scope", "block"),
+        "latex_formula_handling": args.translation_latex_formula_handling,
+        "reasoning_effort": args.translation_reasoning_effort,
+        "document_type": getattr(args, "document_type", "academic"),
+        "_do_latex_repair": getattr(args, "do_latex_repair", True),
+    }
+    profile: TranslationProfile = getattr(args, "translation_profile", "generic")
+    if profile == "translategemma":
+        return TranslateGemmaTranslator(
+            source_lang=getattr(args, "translation_source_lang", "en"),
+            target_lang=getattr(args, "translation_target_lang", "zh"),
+            **common_kwargs,
+        )
+    return GenericChatTranslator(**common_kwargs)
+
+
+def init_annotation_service(
+    args: argparse.Namespace,
+) -> Optional[AnnotationService]:
+    """
+    根据命令行参数创建 annotation 服务实例。
+
+    返回 None 表示当前配置未启用 annotation。
+    """
+    validate_translation_args(args)
+    annotation_mode: AnnotationMode = getattr(args, "annotation_mode", "none")
+    if annotation_mode == "none":
+        return None
+    annotation_base_url, annotation_api_key, annotation_model, annotation_reasoning_effort = (
+        _resolve_annotation_args(args)
+    )
+    annotation_client = configure_openai(
+        base_url=annotation_base_url,
+        api_key=annotation_api_key,
+    )
+    return AnnotationService(
+        client=annotation_client,
+        model=annotation_model,
+        reasoning_effort=annotation_reasoning_effort,
+        enabled=True,
+        mode=annotation_mode,
+    )
+
+
 def init_translation_service(
     args: argparse.Namespace,
 ) -> TranslationService:
@@ -1165,37 +1442,29 @@ def init_translation_service(
     返回:
         TranslationService: 已配置好的翻译服务对象。
     """
-    validate_translation_args(args)
-    annotation_service = None
-    annotation_mode: AnnotationMode = getattr(args, "annotation_mode", "none")
-    if annotation_mode != "none":
-        annotation_base_url, annotation_api_key, annotation_model, annotation_reasoning_effort = (
-            _resolve_annotation_args(args)
-        )
-        annotation_client = configure_openai(
-            base_url=annotation_base_url,
-            api_key=annotation_api_key,
-        )
-        annotation_service = AnnotationService(
-            client=annotation_client,
-            model=annotation_model,
-            reasoning_effort=annotation_reasoning_effort,
-            enabled=True,
-            mode=annotation_mode,
-        )
-    client = configure_openai(
-        base_url=args.translation_base_url,
-        api_key=args.translation_api_key,
+    translator = init_translator(args)
+    service_cls = (
+        TranslateGemmaTranslationService
+        if isinstance(translator, TranslateGemmaTranslator)
+        else TranslationService
     )
-    return TranslationService(
-        client=client,
-        model=args.translation_model,
-        temperature=args.translation_temperature,
-        max_chunk_chars=args.translation_max_chunk_chars,
-        scope=getattr(args, "translation_scope", "block"),
-        latex_formula_handling=args.translation_latex_formula_handling,
-        reasoning_effort=args.translation_reasoning_effort,
-        document_type=getattr(args, "document_type", "academic"),
-        _annotation_service=annotation_service,
-        _do_latex_repair=getattr(args, "do_latex_repair", True),
+    return service_cls(
+        client=translator.client,
+        model=translator.model,
+        temperature=translator.temperature,
+        max_chunk_chars=translator.max_chunk_chars,
+        scope=translator.scope,
+        latex_formula_handling=translator.latex_formula_handling,
+        reasoning_effort=translator.reasoning_effort,
+        document_type=translator.document_type,
+        _annotation_service=init_annotation_service(args),
+        _do_latex_repair=translator._do_latex_repair,
+        **(
+            {
+                "source_lang": translator.source_lang,
+                "target_lang": translator.target_lang,
+            }
+            if isinstance(translator, TranslateGemmaTranslator)
+            else {}
+        ),
     )

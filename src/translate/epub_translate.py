@@ -53,6 +53,51 @@ class HtmlSegment:
     raw_html: str
 
 
+class RawContentPreservingEpubWriter(epub.EpubWriter):
+    """
+    Write XHTML spine items from ``item.content`` instead of ``item.get_content()``.
+
+    EbookLib rebuilds ``EpubHtml`` documents from structured fields such as
+    ``title/metas/links`` when ``get_content()`` is called. For existing EPUBs those
+    fields are often incomplete because the original XHTML head is not parsed back into
+    the object model, which causes stylesheet links and other head-only nodes to vanish
+    on write. For translated chapters we already store the full XHTML back into
+    ``item.content``, so writing the raw bytes is the safest way to preserve the
+    original head and any untouched body structure.
+    """
+
+    def _write_items(self):
+        for item in self.book.get_items():
+            if isinstance(item, epub.EpubNcx):
+                self.out.writestr(
+                    "{FOLDER_NAME}/{file_name}".format(FOLDER_NAME=self.book.FOLDER_NAME, file_name=item.file_name),
+                    self._get_ncx(),
+                )
+            elif isinstance(item, epub.EpubNav):
+                self.out.writestr(
+                    "{FOLDER_NAME}/{file_name}".format(FOLDER_NAME=self.book.FOLDER_NAME, file_name=item.file_name),
+                    self._get_nav(item),
+                )
+            elif item.manifest:
+                content = item.content if isinstance(item, epub.EpubHtml) else item.get_content()
+                self.out.writestr(
+                    "{FOLDER_NAME}/{file_name}".format(FOLDER_NAME=self.book.FOLDER_NAME, file_name=item.file_name),
+                    content,
+                )
+            else:
+                content = item.content if isinstance(item, epub.EpubHtml) else item.get_content()
+                self.out.writestr("{file_name}".format(file_name=item.file_name), content)
+
+
+def write_epub_preserving_raw_html(path: str, book: epub.EpubBook) -> None:
+    """
+    Serialize the EPUB while preserving raw XHTML bytes for existing chapter files.
+    """
+    writer = RawContentPreservingEpubWriter(path, book, options=None)
+    writer.process()
+    writer.write()
+
+
 def resolve_spine_range(spine_arg: Optional[str], total_docs: int) -> List[int]:
     """
     Parse the --spine-range argument into a sorted list of 1-based spine indexes.
@@ -314,17 +359,21 @@ class EpubProcessor:
 
         if not items:
             print("No eligible blocks found; copying EPUB without changes.", file=sys.stderr)
-            epub.write_epub(output_path, book)
+            write_epub_preserving_raw_html(output_path, book)
             print(f"Done. Output written to {output_path}")
             if output_cn_path and book_cn:
-                epub.write_epub(output_cn_path, book_cn)
+                write_epub_preserving_raw_html(output_cn_path, book_cn)
                 print(f"Done. Output written to {output_cn_path}")
             return
 
         print(f"Collected {len(items)} pages for translation.", file=sys.stderr)
         modes = ["interleaved"] if not output_cn_path else ["interleaved", "translated-only"]
         for idx, item in enumerate(items):
-            results = self.translate_html(item.get_content(), modes)
+            # Read the original XHTML bytes directly instead of calling get_content().
+            # EbookLib's get_content() reconstructs <head> from title/metas/links and can
+            # drop existing stylesheet links because read_epub() does not hydrate those
+            # fields from the source file.
+            results = self.translate_html(item.content, modes)
             if not results:
                 continue
             if results[0]:
@@ -335,12 +384,12 @@ class EpubProcessor:
         if output_cn_path and book_cn:
             self._add_cover_badge(book_cn, "CN2")
         self._repair_toc(book)
-        epub.write_epub(output_path, book)
+        write_epub_preserving_raw_html(output_path, book)
         print(f"Done. Output written to {output_path}")
 
         if output_cn_path and book_cn:
             self._repair_toc(book_cn)
-            epub.write_epub(output_cn_path, book_cn)
+            write_epub_preserving_raw_html(output_cn_path, book_cn)
             print(f"Done. Output written to {output_cn_path}")
 
     def _translate_metadata(
@@ -542,7 +591,6 @@ class EpubProcessor:
                 continue
             item = book.get_item_with_id(idref)
             if not isinstance(item, epub.EpubItem):
-                print("not isinstance of EpubHtml: " + str(type(item)))
                 continue
             result.append(item)
         return result

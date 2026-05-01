@@ -37,6 +37,24 @@
         "--ocr-model", "chandra",
         "--translation-base-url", "http://192.168.3.105:11434/v1"
       ]
+    },
+    {
+      "name": "epub_translate: gamma",
+      "type": "python",
+      "request": "launch",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "program": "${workspaceFolder}/src/translate/epub_translate.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--translation-base-url", "http://localhost:8001/v1",
+        "--translation-model", "translategemma-4b-it",
+        "--translation-profile", "translategemma",
+        "--input", "/mnt/d/temp/gamma.epub",
+        "--overwrite",
+        "--output", "/mnt/d/temp/temp.epub"
+      ]
     }
   ]
 }

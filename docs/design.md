@@ -7,6 +7,31 @@
 
 两条流程共用翻译服务模块 [`src/translate/translate_service.py`](/home/wonder/dev/pdftranslate/src/translate/translate_service.py)，但输入介质、中间产物和最终输出不同，因此本文分开说明。
 
+## Translation Profiles
+
+当前翻译模块已经把“纯翻译实现”和“annotation 编排”拆开，并支持按 profile 选择不同 translator：
+
+- `generic`
+  - 面向普通 OpenAI-compatible chat 模型。
+  - 使用 `system + user` 的通用 prompt 结构。
+  - 默认更偏学术文档流程：`document-type=academic`、`annotation-mode=page`、开启 LaTeX repair。
+- `translategemma`
+  - 面向 `TranslateGemma + vLLM` 这类专用翻译模型。
+  - 使用 `<<<source>>><<<target>>><<<text>>>...` 的单条 `user` 消息格式。
+  - 默认更偏纯翻译流程：`document-type=general`、`annotation-mode=none`、关闭 LaTeX repair。
+
+相关参数：
+
+- `--translation-profile`
+- `--translation-source-lang`
+- `--translation-target-lang`
+
+设计上，annotation 不再和 translator 的 prompt 协议绑定：
+
+- translator 负责把原文变成译文
+- annotation service 负责解释/扩写
+- 上层 orchestration 负责把 annotation 插回翻译结果
+
 ## 总体划分
 
 ```mermaid
@@ -75,6 +100,9 @@ flowchart TD
 - `--spine-range`: 只翻译部分 spine 文档。
 - `--output-cn`: 额外输出中文版 EPUB。
 - `--overwrite`: 允许覆盖已有输出文件。
+- `--translation-profile`: 选择 translator 协议，默认 `generic`。
+- `--translation-source-lang`: profile 需要显式语言代码时的源语言，默认 `en`。
+- `--translation-target-lang`: profile 需要显式语言代码时的目标语言，默认 `zh`。
 
 ### 输出
 
@@ -101,6 +129,7 @@ EPUB 流程没有像 PDF 那样把中间阶段产物持久化到单独目录。�
 - 元数据中的 title / description 也会被翻译。
 - 交织版和中文版共用同一批翻译结果，只是在回写模式上不同。
 - 目录会在输出前做一次修复，避免不合法的 TOC 条目导致 EPUB 不可读。
+- 当使用 `translategemma` profile 时，HTML 片段仍然通过 user text 中的附加说明要求“保留标签和属性不变”，而不是依赖 `system prompt`。
 
 ## PDF Translation
 
@@ -256,6 +285,31 @@ OCR stage 不要求“缺一个文件就整阶段重跑”，而是采用两层�
 - 逐页翻译 Markdown。
 - 将 `ocr/images/` 拷贝到 `translate/images/`。
 - 生成整份译文 Markdown 文件与页级译文文件。
+
+### Translation Service Design
+
+翻译阶段当前依赖 [`src/translate/translate_service.py`](/home/wonder/dev/pdftranslate/src/translate/translate_service.py) 中三层职责：
+
+- `GenericChatTranslator`
+  - 默认纯翻译实现。
+  - 负责 prompt 构造、LaTeX 保护/修复、块切分、并发翻页。
+- `TranslateGemmaTranslator`
+  - `translategemma` profile 的纯翻译实现。
+  - 负责把请求改写成 `TranslateGemma` 所需的 tagged user message。
+- `AnnotationOrchestrationMixin`
+  - 负责 page/item annotation 的插入时机。
+  - 该 mixin 被 annotated service 复用，而不进入纯 translator 基类。
+
+组合结果：
+
+- `TranslationService = AnnotationOrchestrationMixin + GenericChatTranslator`
+- `TranslateGemmaTranslationService = AnnotationOrchestrationMixin + TranslateGemmaTranslator`
+
+这样做的目的：
+
+- 切换 translator profile 时，不影响 annotation backend 的选择。
+- 引入新的专用翻译模型时，只需要新增 translator 实现，不需要复制 annotation 编排逻辑。
+- PDF / EPUB 入口继续只依赖统一的 `init_translation_service(...)` 装配函数。
 
 ## WeasyPrint Render Flow
 
