@@ -122,6 +122,7 @@ class OCRMarkdownClientInitTest(unittest.TestCase):
             ocr_base_url="http://localhost:11434/v1",
             ocr_api_key="secret",
             ocr_model="gemma4:26b",
+            ocr_timeout_seconds=45.0,
         )
 
         with patch("ocr_client.configure_openai", return_value="client") as mocked_configure, patch(
@@ -129,7 +130,11 @@ class OCRMarkdownClientInitTest(unittest.TestCase):
         ) as mocked_client:
             init_ocr_client(args)
 
-        mocked_configure.assert_called_once_with("http://localhost:11434/v1", "secret")
+        mocked_configure.assert_called_once_with(
+            "http://localhost:11434/v1",
+            "secret",
+            timeout_seconds=45.0,
+        )
         mocked_client.assert_called_once_with(
             client="client",
             model="gemma4:26b",
@@ -140,6 +145,7 @@ class OCRMarkdownClientInitTest(unittest.TestCase):
             ocr_base_url="http://localhost:8000/v1",
             ocr_api_key="secret",
             ocr_model="chandra-ocr",
+            ocr_timeout_seconds=30.0,
         )
 
         with patch("ocr_client.configure_openai", return_value="client") as mocked_configure, patch(
@@ -147,7 +153,11 @@ class OCRMarkdownClientInitTest(unittest.TestCase):
         ) as mocked_client:
             init_ocr_client(args)
 
-        mocked_configure.assert_called_once_with("http://localhost:8000/v1", "secret")
+        mocked_configure.assert_called_once_with(
+            "http://localhost:8000/v1",
+            "secret",
+            timeout_seconds=30.0,
+        )
         mocked_client.assert_called_once_with(
             client="client",
             model="chandra-ocr",

@@ -10,7 +10,11 @@ from typing import Any, Protocol
 
 from PIL import Image
 
-from llm_util import has_low_diversity_or_repetition, configure_openai
+from llm_util import (
+    DEFAULT_OCR_TIMEOUT_SECONDS,
+    configure_openai,
+    has_low_diversity_or_repetition,
+)
 
 DEFAULT_OCR_IMAGE_MAX_SIDE = 640
 REPEATED_NUMBERING_PATTERN = re.compile(r"(?:^|\s)(?:\d+\.\s*){40,}")
@@ -81,7 +85,11 @@ def ocr_model_preserves_bold_markdown(model_name: str | None) -> bool:
 
 
 def init_ocr_client(args: argparse.Namespace) -> OCRClient:
-    client = configure_openai(args.ocr_base_url, args.ocr_api_key)
+    client = configure_openai(
+        args.ocr_base_url,
+        args.ocr_api_key,
+        timeout_seconds=getattr(args, "ocr_timeout_seconds", DEFAULT_OCR_TIMEOUT_SECONDS),
+    )
     model_name = (args.ocr_model or "").lower()
 
     if "chandra" in model_name:

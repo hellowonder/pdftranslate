@@ -15,6 +15,8 @@ from typing import Any, Iterator, List, Literal, Optional, Protocol, Sequence, T
 
 from tqdm import tqdm
 from llm_util import (
+    DEFAULT_ANNOTATION_TIMEOUT_SECONDS,
+    DEFAULT_TRANSLATION_TIMEOUT_SECONDS,
     configure_openai,
     create_chat_completion_with_retry,
     has_low_diversity_or_repetition,
@@ -1245,6 +1247,15 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
         help="Sampling temperature for translation.",
     )
     parser.add_argument(
+        "--translation-timeout-seconds",
+        type=float,
+        default=DEFAULT_TRANSLATION_TIMEOUT_SECONDS,
+        help=(
+            "Read timeout in seconds for each translation LLM request. "
+            "Use 0 or a negative value to disable the timeout."
+        ),
+    )
+    parser.add_argument(
         "--translation-workers",
         type=int,
         default=16,
@@ -1294,6 +1305,15 @@ def add_translation_arguments(parser: argparse.ArgumentParser) -> None:
         "--annotation-reasoning-effort",
         choices=["none", "low", "medium", "high"],
         help="Best-effort reasoning/thinking level requested from the annotation backend. Defaults to --translation-reasoning-effort.",
+    )
+    parser.add_argument(
+        "--annotation-timeout-seconds",
+        type=float,
+        default=DEFAULT_ANNOTATION_TIMEOUT_SECONDS,
+        help=(
+            "Read timeout in seconds for each annotation LLM request. "
+            "Use 0 or a negative value to disable the timeout."
+        ),
     )
     parser.add_argument(
         "--document-type",
@@ -1381,6 +1401,7 @@ def init_translator(
     client = configure_openai(
         base_url=args.translation_base_url,
         api_key=args.translation_api_key,
+        timeout_seconds=getattr(args, "translation_timeout_seconds", DEFAULT_TRANSLATION_TIMEOUT_SECONDS),
     )
     common_kwargs = {
         "client": client,
@@ -1421,6 +1442,7 @@ def init_annotation_service(
     annotation_client = configure_openai(
         base_url=annotation_base_url,
         api_key=annotation_api_key,
+        timeout_seconds=getattr(args, "annotation_timeout_seconds", DEFAULT_ANNOTATION_TIMEOUT_SECONDS),
     )
     return AnnotationService(
         client=annotation_client,

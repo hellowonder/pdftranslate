@@ -59,6 +59,9 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
         self.assertTrue(args.generate_interleave_pdf)
         self.assertFalse(args.generate_translation_only_pdf)
         self.assertEqual(args.translation_base_url, "http://localhost:11434/v1")
+        self.assertEqual(args.ocr_timeout_seconds, 120.0)
+        self.assertEqual(args.translation_timeout_seconds, 90.0)
+        self.assertEqual(args.annotation_timeout_seconds, 60.0)
         self.assertEqual(args.translation_profile, "generic")
         self.assertEqual(args.document_type, "academic")
         self.assertEqual(args.annotation_mode, "page")
@@ -123,6 +126,28 @@ class PdfTranslateStageArtifactsTest(unittest.TestCase):
             args = parse_args()
 
         self.assertEqual(args.translation_base_url, "http://localhost:9999/v1")
+
+    def test_parse_args_accepts_llm_timeout_overrides(self) -> None:
+        argv = [
+            "pdf_translate.py",
+            "--input",
+            "tests/data/one_page.pdf",
+            "--output-dir",
+            "tests/data/output",
+            "--ocr-timeout-seconds",
+            "15",
+            "--translation-timeout-seconds",
+            "25",
+            "--annotation-timeout-seconds",
+            "35",
+        ]
+
+        with patch.object(sys, "argv", argv):
+            args = parse_args()
+
+        self.assertEqual(args.ocr_timeout_seconds, 15.0)
+        self.assertEqual(args.translation_timeout_seconds, 25.0)
+        self.assertEqual(args.annotation_timeout_seconds, 35.0)
 
     def test_parse_args_accepts_translation_scope(self) -> None:
         argv = [

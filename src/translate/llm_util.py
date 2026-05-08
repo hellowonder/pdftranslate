@@ -9,6 +9,7 @@ import sys
 from collections import Counter
 from typing import Any, Sequence
 
+import httpx
 from openai import OpenAI
 
 CODE_FENCE_PATTERN = re.compile(
@@ -18,6 +19,14 @@ CODE_FENCE_PATTERN = re.compile(
 THINK_TAG_PATTERN = re.compile(r"<think\b[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
 THINK_OPEN_TAG_PATTERN = re.compile(r"<think\b[^>]*>", re.IGNORECASE)
 THINK_CLOSE_TAG_PATTERN = re.compile(r"</think\s*>", re.IGNORECASE)
+
+DEFAULT_OCR_TIMEOUT_SECONDS = 120.0
+DEFAULT_TRANSLATION_TIMEOUT_SECONDS = 90.0
+DEFAULT_ANNOTATION_TIMEOUT_SECONDS = 60.0
+DEFAULT_OPENAI_CONNECT_TIMEOUT_SECONDS = 5.0
+DEFAULT_OPENAI_WRITE_TIMEOUT_SECONDS = 30.0
+DEFAULT_OPENAI_POOL_TIMEOUT_SECONDS = 5.0
+DEFAULT_OPENAI_MAX_RETRIES = 0
 
 def has_low_diversity_or_repetition(text: str) -> bool:
     tokens = (text or "").split()
@@ -35,11 +44,38 @@ def has_low_diversity_or_repetition(text: str) -> bool:
     return any(count > 10 for count in counter.values())
 
 
-def configure_openai(base_url: str, api_key: str) -> OpenAI:
+def build_openai_timeout(timeout_seconds: float | None) -> httpx.Timeout | None:
+    """
+    Build a bounded timeout configuration for OpenAI-compatible HTTP requests.
+    """
+    if timeout_seconds is None:
+        return None
+    if timeout_seconds <= 0:
+        return None
+    return httpx.Timeout(
+        connect=DEFAULT_OPENAI_CONNECT_TIMEOUT_SECONDS,
+        write=DEFAULT_OPENAI_WRITE_TIMEOUT_SECONDS,
+        read=timeout_seconds,
+        pool=DEFAULT_OPENAI_POOL_TIMEOUT_SECONDS,
+    )
+
+
+def configure_openai(
+    base_url: str,
+    api_key: str,
+    *,
+    timeout_seconds: float | None,
+    max_retries: int = DEFAULT_OPENAI_MAX_RETRIES,
+) -> OpenAI:
     """
     Instantiate an OpenAI client pointed at an OpenAI-compatible endpoint.
     """
-    return OpenAI(base_url=base_url, api_key=api_key)
+    return OpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        timeout=build_openai_timeout(timeout_seconds),
+        max_retries=max_retries,
+    )
 
 
 def strip_code_fences(text: str) -> str:

@@ -59,8 +59,8 @@ VLLM_SERVER_DEV_MODE=1 ./.vllm-env/bin/vllm serve \
 
 ```bash
 ./.vllm-env/bin/vllm serve \
-  Infomaniak-AI/vllm-translategemma-12b-it \
-  --served-model-name translategemma-12b-it \
+  Infomaniak-AI/vllm-translategemma-4b-it \
+  --served-model-name translategemma-4b-it \
   --host 0.0.0.0 \
   --port 8001 \
   --gpu-memory-utilization 0.85
@@ -72,7 +72,7 @@ VLLM_SERVER_DEV_MODE=1 ./.vllm-env/bin/vllm serve \
 - README 里示例把翻译服务放在 `http://localhost:8001/v1`，避免和 OCR 默认占用的 `8000` 端口冲突。
 - 启动后，命令行里把翻译参数改成：
   - `--translation-base-url http://localhost:8001/v1`
-  - `--translation-model translategemma-12b-it`
+  - `--translation-model translategemma-4b-it`
   - `--translation-profile translategemma`
 
 虽然 README 里的示例使用默认配置，但后台模型和服务地址都可以通过命令行参数覆盖。

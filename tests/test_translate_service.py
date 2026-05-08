@@ -818,6 +818,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_api_key="translate-key",
             translation_model="gemma4:26b",
             translation_reasoning_effort="none",
+            translation_timeout_seconds=75.0,
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
             translation_scope="block",
@@ -827,6 +828,7 @@ class TranslationServiceTest(unittest.TestCase):
             annotation_api_key=None,
             annotation_model=None,
             annotation_reasoning_effort=None,
+            annotation_timeout_seconds=60.0,
         )
 
         with patch("translate_service.configure_openai", return_value="codex-client") as mocked_configure:
@@ -835,6 +837,7 @@ class TranslationServiceTest(unittest.TestCase):
         mocked_configure.assert_called_once_with(
             base_url="http://translate/v1",
             api_key="translate-key",
+            timeout_seconds=75.0,
         )
         self.assertEqual(service.client, "codex-client")
         self.assertEqual(service.reasoning_effort, "none")
@@ -851,6 +854,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_source_lang="en",
             translation_target_lang="zh",
             translation_reasoning_effort="none",
+            translation_timeout_seconds=75.0,
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
             translation_scope="block",
@@ -862,6 +866,7 @@ class TranslationServiceTest(unittest.TestCase):
             annotation_api_key=None,
             annotation_model=None,
             annotation_reasoning_effort=None,
+            annotation_timeout_seconds=60.0,
         )
 
         with patch("translate_service.configure_openai", return_value="codex-client"):
@@ -879,6 +884,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_api_key="translate-key",
             translation_model="gemma4:26b",
             translation_reasoning_effort="none",
+            translation_timeout_seconds=75.0,
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
             translation_scope="block",
@@ -888,6 +894,7 @@ class TranslationServiceTest(unittest.TestCase):
             annotation_api_key="annotation-key",
             annotation_model="gpt-4o-mini",
             annotation_reasoning_effort="medium",
+            annotation_timeout_seconds=25.0,
         )
 
         with patch(
@@ -899,6 +906,7 @@ class TranslationServiceTest(unittest.TestCase):
         mocked_configure.assert_called_once_with(
             base_url="http://annotation/v1",
             api_key="annotation-key",
+            timeout_seconds=25.0,
         )
         self.assertIsNotNone(annotation_service)
         self.assertEqual(annotation_service.client, "annotation-client")
@@ -912,6 +920,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_api_key="translate-key",
             translation_model="gemma4:26b",
             translation_reasoning_effort="low",
+            translation_timeout_seconds=80.0,
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
             translation_scope="page",
@@ -921,6 +930,7 @@ class TranslationServiceTest(unittest.TestCase):
             annotation_api_key=None,
             annotation_model=None,
             annotation_reasoning_effort=None,
+            annotation_timeout_seconds=35.0,
         )
 
         with patch(
@@ -935,6 +945,7 @@ class TranslationServiceTest(unittest.TestCase):
             {
                 "base_url": "http://translate/v1",
                 "api_key": "translate-key",
+                "timeout_seconds": 80.0,
             },
         )
         self.assertEqual(
@@ -942,6 +953,7 @@ class TranslationServiceTest(unittest.TestCase):
             {
                 "base_url": "http://translate/v1",
                 "api_key": "translate-key",
+                "timeout_seconds": 35.0,
             },
         )
         self.assertIsNotNone(service.annotator)
@@ -955,6 +967,7 @@ class TranslationServiceTest(unittest.TestCase):
             translation_api_key="translate-key",
             translation_model="gemma4:26b",
             translation_reasoning_effort="none",
+            translation_timeout_seconds=80.0,
             translation_temperature=0.2,
             translation_max_chunk_chars=1200,
             translation_scope="block",
@@ -964,6 +977,7 @@ class TranslationServiceTest(unittest.TestCase):
             annotation_api_key="annotation-key",
             annotation_model="gpt-4o-mini",
             annotation_reasoning_effort="medium",
+            annotation_timeout_seconds=25.0,
         )
 
         with patch(

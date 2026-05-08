@@ -110,6 +110,8 @@ shared_translation_args=(
   --translation-base-url http://localhost:8001/v1
   --translation-model translategemma-4b-it
   --translation-profile translategemma
+  #--translation-base-url http://172.22.0.1:11434/v1
+  #--translation-model gemma4:26b
 )
 
 pdf_default_args=(

@@ -13,6 +13,7 @@ from translate_service import add_translation_arguments, validate_translation_ar
 from translate_stage import run_translate_stage
 from render_weasyprint import DEFAULT_KATEX_CSS_PATH
 from render_stage import run_render_stage
+from llm_util import DEFAULT_OCR_TIMEOUT_SECONDS
 
 STAGE_SEQUENCE = ("ocr", "translate", "render")
 
@@ -151,6 +152,15 @@ def parse_args():
         type=int,
         default=8,
         help="Parallel workers for OCR page requests.",
+    )
+    parser.add_argument(
+        "--ocr-timeout-seconds",
+        type=float,
+        default=DEFAULT_OCR_TIMEOUT_SECONDS,
+        help=(
+            "Read timeout in seconds for each OCR LLM request. "
+            "Use 0 or a negative value to disable the timeout."
+        ),
     )
     parser.add_argument("--font-path", help="TrueType font path for rendering text (should support Chinese).")
     parser.add_argument(

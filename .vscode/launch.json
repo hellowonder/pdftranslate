@@ -51,7 +51,7 @@
         "--translation-base-url", "http://localhost:8001/v1",
         "--translation-model", "translategemma-4b-it",
         "--translation-profile", "translategemma",
-        "--input", "/mnt/d/temp/gamma.epub",
+        "--input", "/mnt/d/books6_options/_OceanofPDF.com_Machine_Learning_and_Data_Science_Blueprints_for_Finance_-_Hariom_Tatsat.epub",
         "--overwrite",
         "--output", "/mnt/d/temp/temp.epub"
       ]

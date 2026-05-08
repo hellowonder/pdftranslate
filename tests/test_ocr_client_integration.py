@@ -70,7 +70,11 @@ class OCRClientIntegrationTest(unittest.TestCase):
         ocr_base_url = os.environ.get("OCR_BASE_URL", "http://localhost:11434/v1")
         ocr_api_key = os.environ.get("OCR_API_KEY", "ollama")
         client = DeepseekOCRClient(
-            client=configure_openai(ocr_base_url, ocr_api_key),
+            client=configure_openai(
+                ocr_base_url,
+                ocr_api_key,
+                timeout_seconds=120.0,
+            ),
             model=os.environ.get("OCR_MODEL", "deepseek-ocr:3b"),
         )
 
